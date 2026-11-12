@@ -97,7 +97,7 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 	}
 	if cfg.Web.Listen != "" {
 		web := transport.NewWeb(cfg.Web.Listen, cfg.Web.ResolvedToken)
-		if err := web.Start(ctx); err != nil {
+		if err := web.Start(ctx, logger); err != nil {
 			return err
 		}
 		trs = append(trs, web)

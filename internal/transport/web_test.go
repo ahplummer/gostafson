@@ -3,6 +3,8 @@ package transport
 import (
 	"bufio"
 	"context"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -170,4 +172,36 @@ func readAll(resp *http.Response) string {
 		b.WriteString(sc.Text() + "\n")
 	}
 	return b.String()
+}
+
+// An address that isn't on any interface yet (Tailscale at boot) is retried in
+// the background instead of failing startup.
+func TestWebStartRetriesMissingAddress(t *testing.T) {
+	retryInterval = 10 * time.Millisecond
+	defer func() { retryInterval = 5 * time.Second }()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	w := NewWeb("192.0.2.1:8484", "t") // TEST-NET-1: never assigned here
+	if err := w.Start(ctx, slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatalf("Start = %v, want nil (retry in background)", err)
+	}
+	time.Sleep(50 * time.Millisecond) // a few retries; none may report an error
+	select {
+	case err := <-w.listenErr:
+		t.Fatalf("retry reported %v", err)
+	default:
+	}
+}
+
+// Other listen errors, such as a port already in use, still fail startup.
+func TestWebStartFailsOnPortInUse(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	w := NewWeb(ln.Addr().String(), "t")
+	if err := w.Start(context.Background(), slog.New(slog.DiscardHandler)); err == nil {
+		t.Fatal("Start on a port in use = nil, want an error")
+	}
 }

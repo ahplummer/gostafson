@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -68,12 +70,49 @@ func NewWeb(addr, token string) *Web {
 // Name implements Transport.
 func (w *Web) Name() string { return "web" }
 
-// Start listens on the address and serves until ctx ends.
-func (w *Web) Start(ctx context.Context) error {
+// Start listens on the address and serves until ctx ends. If the address
+// isn't on any interface yet (at boot, before Tailscale is up), it keeps
+// trying every few seconds in the background instead of failing, so the
+// other transports still start. Any other listen error is returned.
+func (w *Web) Start(ctx context.Context, log *slog.Logger) error {
 	ln, err := net.Listen("tcp", w.addr)
+	if errors.Is(err, syscall.EADDRNOTAVAIL) {
+		log.Warn("web page: address not up yet (Tailscale still starting?); retrying", "addr", w.addr)
+		go w.retryListen(ctx, log)
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("web: %w", err)
 	}
+	w.serve(ctx, ln)
+	return nil
+}
+
+// retryInterval is how often Start retries an address that isn't up yet.
+var retryInterval = 5 * time.Second
+
+func (w *Web) retryListen(ctx context.Context, log *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryInterval):
+		}
+		ln, err := net.Listen("tcp", w.addr)
+		if errors.Is(err, syscall.EADDRNOTAVAIL) {
+			continue
+		}
+		if err != nil {
+			w.listenErr <- fmt.Errorf("web: %w", err)
+			return
+		}
+		log.Warn("web page: listening", "addr", w.addr)
+		w.serve(ctx, ln)
+		return
+	}
+}
+
+func (w *Web) serve(ctx context.Context, ln net.Listener) {
 	srv := &http.Server{Handler: w.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -86,7 +125,6 @@ func (w *Web) Start(ctx context.Context) error {
 		defer cancel()
 		srv.Shutdown(shut)
 	}()
-	return nil
 }
 
 // Handler returns the HTTP routes. Exposed for tests.
