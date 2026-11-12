@@ -111,8 +111,10 @@ service-log:
 	ssh -t $(DEPLOY_HOST) 'sudo tail -n 50 -f /Users/$(AGENT_USER)/logs/gostafson.log /Users/$(AGENT_USER)/logs/wn-agent.log'
 
 service-status:
-	ssh $(DEPLOY_HOST) 'for s in com.gostafson.agent com.gostafson.wn-agent; do \
-	  printf "%-24s " $$s; launchctl print system/$$s 2>/dev/null | grep -E "^\s+(state|pid|last exit code) =" | tr -s " " | tr "\n" " " || printf "not loaded"; echo; done'
+	@ssh $(DEPLOY_HOST) 'for s in com.gostafson.agent com.gostafson.wn-agent; do \
+	  if out=$$(launchctl print system/$$s 2>/dev/null); then \
+	    printf "%-24s %s\n" $$s "$$(printf "%s\n" "$$out" | grep -E "^	(state|pid|last exit code) =" | sed "s/^	//" | paste -sd ";" -)"; \
+	  else printf "%-24s not loaded\n" $$s; fi; done'
 
 clean:
 	rm -rf dist

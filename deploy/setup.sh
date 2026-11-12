@@ -101,9 +101,11 @@ else
 fi
 
 say "5. White Noise account"
-if [ -d "$WN_HOME/accounts" ]; then
-	skip "$WN_HOME already has an account"
-elif [ -d "$WN_HOME_SRC/accounts" ]; then
+# The original stays in the admin's home until the very last step (the
+# rename), so "original still there" means the move hasn't finished, and an
+# interrupted run is simply redone. The copy goes to a staging directory and
+# is swapped in only when complete.
+if [ -d "$WN_HOME_SRC/accounts" ]; then
 	pids=$(pgrep -f "wn-agent --home $WN_HOME_SRC" || true)
 	if [ -n "$pids" ]; then
 		skip "stopping wn-agent running from $WN_HOME_SRC (pid $pids)"
@@ -111,13 +113,26 @@ elif [ -d "$WN_HOME_SRC/accounts" ]; then
 		for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -f "wn-agent --home $WN_HOME_SRC" >/dev/null || break; sleep 1; done
 		pgrep -f "wn-agent --home $WN_HOME_SRC" >/dev/null && die "wn-agent from $WN_HOME_SRC didn't stop; stop it and re-run"
 	fi
-	ditto "$WN_HOME_SRC" "$WN_HOME"
-	rm -f "$WN_HOME"/dev/*.sock "$WN_HOME/.marmot-runtime.lock"
-	chown -R "$AGENT:$AGENT" "$WN_HOME"
-	chmod -R go-rwx "$WN_HOME"
+	# A destination account that differs from the original is not a leftover
+	# from an interrupted move: never overwrite it.
+	for f in "$WN_HOME"/accounts/*/account.json; do
+		[ -e "$f" ] || continue
+		cmp -s "$f" "$WN_HOME_SRC/${f#"$WN_HOME"/}" ||
+			die "$WN_HOME holds a different account than $WN_HOME_SRC; move one aside and re-run"
+	done
+	rm -f "$WN_HOME_SRC"/dev/*.sock "$WN_HOME_SRC/.marmot-runtime.lock" # stale: wn-agent is stopped; sockets can't be copied
+	staging="$WN_HOME.partial"
+	rm -rf "$staging"
+	ditto "$WN_HOME_SRC" "$staging"
+	chown -R "$AGENT:$AGENT" "$staging"
+	chmod -R go-rwx "$staging"
+	rm -rf "$WN_HOME" # leftover from an interrupted run (checked above)
+	mv "$staging" "$WN_HOME"
 	backup="$WN_HOME_SRC.moved-to-agent-$(date +%Y%m%d%H%M%S)"
 	mv "$WN_HOME_SRC" "$backup"
 	skip "moved the account to $WN_HOME; old copy renamed to $backup (delete it once White Noise works)"
+elif [ -d "$WN_HOME/accounts" ]; then
+	skip "$WN_HOME already has an account"
 else
 	skip "no account at $WN_HOME_SRC; bootstrap one as $AGENT later (see docs/reference-architecture.md section 10)"
 fi
