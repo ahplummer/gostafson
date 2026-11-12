@@ -1,0 +1,102 @@
+# gostafson configuration.
+# Copy to config.toml on the host, or config.local.toml for local development.
+# Both copies are gitignored. Relative paths are relative to this file.
+
+default_profile = "default"
+
+# API keys come from one of two places, set per profile:
+#   api_key_env = "NAME"  an environment variable (dev: `bwset NAME` from Bitwarden)
+#   api_key = "name"      a key in secrets_file (host: written by `make push-secrets`)
+# secrets_file is a flat TOML file of name = "key" pairs with mode 0600.
+# secrets_file = "secrets.toml"
+
+[sessions]
+path = "var/sessions.db"
+max_messages = 40          # history messages sent with each turn
+
+[audit]
+path = "var/audit.jsonl"   # one JSON line per turn and per tool call; contains prompts (mode 0600)
+
+[approval]
+timeout = "60s"            # risky tool calls (write_file over an existing file) ask y/N; no answer means no
+
+# --- Transports. Any combination can run at once; each chat keeps its own history.
+
+[cli]
+enabled = true             # the terminal REPL; set false for the background service on the host
+
+# A chat page for a browser, e.g. your phone over Tailscale. listen must be a
+# loopback or Tailscale IP (100.x.y.z) with a port; all-interfaces and LAN
+# addresses are refused. Log in once with the token; the page keeps a cookie.
+# [web]
+# listen = "127.0.0.1:8484"          # host: "<the host's Tailscale IP>:8484"
+# token_env = "GOSTAFSON_WEB_TOKEN"  # dev: bwset GOSTAFSON_WEB_TOKEN; host: token = "web_token" in secrets_file
+
+# Telegram bot (long polling). Not end-to-end encrypted: Telegram's servers see
+# messages and replies. Only allowed_users are answered (your numeric user ID;
+# @userinfobot tells you). Use a bot of its own: two programs can't poll one bot.
+# [telegram]
+# token_env = "GOSTAFSON_TELEGRAM_TOKEN"  # from @BotFather; host: token = "telegram_token"
+# allowed_users = [123456789]
+
+# White Noise / Marmot through a local wn-agent (end-to-end encrypted). Run a
+# wn-agent of gostafson's own (its own --home, socket and account), not Hermes'.
+# allowed_senders: npubs (or hex) whose messages are answered.
+# [whitenoise]
+# socket = "~/.marmot-agents/gostafson/dev/wn-agent.sock"
+# allowed_senders = ["npub1..."]
+
+[loop]
+max_steps = 8              # model calls per turn
+turn_timeout = "120s"
+
+# Each profile's name is also its @tag. A tag applies to one message only.
+#
+# model: gostafson-qwen3.5-9b is qwen3.5:9b with a 32K context window, created
+# by `make models`. Ollama's /v1 API can't set the context size per request and
+# defaults to 4096 tokens, which tool results overflow.
+#
+# tools: list_dir, read_file, write_file, search_files. Empty means chat only.
+# root: the only directory the tools can touch (enforced with os.Root).
+# A profile whose base_url isn't localhost gets no file tools unless
+# allow_remote_file_tools = true.
+
+[profiles.default]
+base_url = "http://localhost:11434/v1"   # Ollama; locally this goes through `make tunnel`
+model = "gostafson-qwen3.5-9b"
+think_toggle = true        # reasoning off unless the message contains think=true
+system_prompt = """
+You are a concise assistant running on a local model. Answer directly.
+If you don't know something, say so."""
+
+[profiles.code]
+base_url = "http://localhost:11434/v1"
+model = "gostafson-qwen3.5-9b"   # until the M5 evals pick a coding model
+think_toggle = true
+temperature = 0.2
+tools = ["list_dir", "read_file", "write_file", "search_files"]
+root = "var/work/code"   # host: "/Users/agent/work/napps"
+system_prompt = """
+You are a web developer working on small static and Nostr web apps.
+Prefer plain HTML, CSS and JavaScript.
+You have file tools for one working directory. Paths are relative to it; "." is the top.
+Look at files before changing them. When you write a file, write its complete contents.
+Don't repeat a file's contents in your reply unless asked; say what you found or changed."""
+
+# Cloud profiles. Only used when a message is tagged; default_profile must be local.
+# Remote profiles get text-only history: tool calls and tool results (file
+# contents) from earlier turns are not sent. They get no file tools unless
+# allow_remote_file_tools = true.
+# For openrouter.ai, provider.data_collection defaults to "deny" (only providers
+# that don't store or train on your data). Add zero data retention with:
+#   provider = { data_collection = "deny", zdr = true }
+# [profiles.cloud]
+# base_url = "https://openrouter.ai/api/v1"
+# model = "provider/model-name"
+# api_key_env = "OPENROUTER_API_KEY"
+# plugins = [{ id = "web", engine = "exa", max_results = 5 }]   # web search (Exa: $0.007 per request; omit engine for the provider's own search, priced by the provider)
+#
+# [profiles.claude]
+# base_url = "https://openrouter.ai/api/v1"
+# model = "anthropic/model-name"
+# api_key_env = "OPENROUTER_API_KEY"

@@ -1,0 +1,73 @@
+# gostafson configuration for the host (the LaunchDaemon).
+# Copy to config.host.toml (gitignored), replace every value in angle brackets, then
+# `make push-config` installs it as /usr/local/etc/gostafson/config.toml,
+# owned by root: the agent can read its config but not change it.
+# Paths are absolute. Secrets come from secrets_file (`make push-secrets`).
+
+default_profile = "default"
+secrets_file = "/Users/agent/secrets.toml"
+
+[sessions]
+path = "/Users/agent/var/sessions.db"
+max_messages = 40
+
+[audit]
+path = "/Users/agent/logs/audit.jsonl"
+
+[approval]
+timeout = "120s"           # longer than on the CLI: the phone may be in a pocket
+
+[cli]
+enabled = false            # no terminal under launchd
+
+# Web page on the tailnet. listen: the host's Tailscale IP (`tailscale ip -4`).
+[web]
+listen = "<100.x.y.z>:8484"
+token = "web_token"        # GOSTAFSON_WEB_TOKEN in make push-secrets
+
+# Telegram. Not end-to-end encrypted (PRD D25).
+[telegram]
+token = "telegram_token"   # GOSTAFSON_TELEGRAM_TOKEN in make push-secrets
+allowed_users = [<your Telegram user ID>]
+
+# White Noise through gostafson's own wn-agent (com.gostafson.wn-agent).
+[whitenoise]
+socket = "/Users/agent/.marmot-agents/gostafson/dev/wn-agent.sock"
+allowed_senders = ["<your npub>"]
+
+[loop]
+max_steps = 8
+turn_timeout = "300s"      # includes time waiting for approvals
+
+[profiles.default]
+base_url = "http://localhost:11434/v1"
+model = "gostafson-qwen3.5-9b"
+think_toggle = true
+system_prompt = """
+You are a concise assistant running on a local model. Answer directly.
+If you don't know something, say so."""
+
+[profiles.code]
+base_url = "http://localhost:11434/v1"
+model = "gostafson-qwen3.5-9b"
+think_toggle = true
+temperature = 0.2
+tools = ["list_dir", "read_file", "write_file", "search_files"]
+root = "/Users/agent/work/napps"
+system_prompt = """
+You are a web developer working on small static and Nostr web apps.
+Prefer plain HTML, CSS and JavaScript.
+You have file tools for one working directory. Paths are relative to it; "." is the top.
+Look at files before changing them. When you write a file, write its complete contents.
+Don't repeat a file's contents in your reply unless asked; say what you found or changed."""
+
+[profiles.cloud]
+base_url = "https://openrouter.ai/api/v1"
+model = "<provider/model>"
+api_key = "openrouter"     # OPENROUTER_API_KEY in make push-secrets
+plugins = [{ id = "web", engine = "exa", max_results = 5 }]   # web search, $0.007 per request
+
+[profiles.claude]
+base_url = "https://openrouter.ai/api/v1"
+model = "<anthropic/model>"
+api_key = "openrouter"

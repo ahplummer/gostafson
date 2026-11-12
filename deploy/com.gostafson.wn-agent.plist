@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- gostafson's White Noise connector, as the agent user. Installed by setup.sh. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.gostafson.wn-agent</string>
+  <key>UserName</key><string>agent</string>
+  <key>GroupName</key><string>agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/libexec/gostafson/wn-agent</string>
+    <string>--home</string>
+    <string>/Users/agent/.marmot-agents/gostafson</string>
+    <string>--socket</string>
+    <string>/Users/agent/.marmot-agents/gostafson/dev/wn-agent.sock</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/agent</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/Users/agent</string>
+  </dict>
+  <key>StandardInPath</key><string>/dev/null</string>
+  <key>StandardOutPath</key><string>/Users/agent/logs/wn-agent.log</string>
+  <key>StandardErrorPath</key><string>/Users/agent/logs/wn-agent.log</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>Umask</key><integer>63</integer>
+</dict>
+</plist>

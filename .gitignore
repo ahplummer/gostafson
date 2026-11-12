@@ -1,0 +1,22 @@
+# Build output
+dist/
+
+# Runtime data (sessions database, logs) from local runs
+var/
+*.db
+*.db-wal
+*.db-shm
+
+# Host-specific and secret files. Only *.example files are committed.
+Makefile.local
+config.toml
+config.local.toml
+secrets.toml
+*.secrets.toml
+.env
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+config.host.toml

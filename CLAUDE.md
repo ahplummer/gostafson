@@ -1,0 +1,63 @@
+# gostafson
+
+A small, local-first agent harness in Go for one Apple Silicon Mac: local models by default, `@tag` model switching per message, optional cloud models via OpenRouter, a messenger for remote access, and tight limits on what the agent can touch.
+
+## Read first
+
+- `docs/PRD.md`: goals, requirements (FR/NFR), decision log (D1...), milestones with acceptance criteria. Check the decision log before proposing a different approach; add a row when a decision changes.
+- `docs/reference-architecture.md`: terms, diagram, components, deployment.
+- `docs/gcp-comparison.md`: compare/contrast with the GCP agent reference architecture.
+
+## Status
+
+- M1 (chat over CLI with tag routing): done.
+- M2 (file tools, guard with `os.Root`, JSONL audit log): done.
+- M3 (cloud profile rules, OpenRouter data-collection preference, approval gate on the CLI): built; `@claude` checked live, `@cloud` not yet.
+- M4 (transports, `setup.sh`, LaunchDaemon, first deploy): in progress. CLI colors, web page, Telegram and White Noise done and tested live; deploy next.
+
+## Rules
+
+- **Public repo.** Never put host names, personal names or secrets in committed files, comments or commit messages. Say "the host". Host-specific values live only in gitignored files: `Makefile.local`, `config.local.toml`, `config.host.toml`, `config.toml`, `secrets.toml`.
+- **Git is manual.** Don't run git commands that change state (add, commit, push, branch). Read-only commands are fine.
+- **Dependencies.** Standard library first. Allowed: `modernc.org/sqlite`, `github.com/BurntSushi/toml`, and later one messenger client. Ask before adding anything else. No agent frameworks; no `openai-go` (PRD D12).
+- **Security invariants** (tests must cover them; a failing guard test blocks deploy):
+  - All file access from tools goes through `os.Root`.
+  - No shell: commands run as argv from an allowlist, never `sh -c`.
+  - Cloud profiles get no file tools by default and text-only history; nothing routes to a cloud profile without an explicit tag or approval; `default_profile` must be local.
+  - Subagents and the decision model can only narrow permissions.
+- Keep each `internal/` package small enough to read in one sitting.
+
+## Layout
+
+```
+cmd/gostafson/       main.go: wiring, flags, turn handling; serve.go: transports and per-chat workers; commands.go: /help /profiles /status /reset
+internal/config/     TOML config; API keys from env vars (dev) or a 0600 secrets file (host)
+internal/client/     OpenAI-compatible chat completions client (net/http)
+internal/router/     @tag and think=true parsing
+internal/loop/       agent loop: model call, tools, step limit
+internal/tools/      file tools (list_dir, read_file, write_file, search_files) on an *os.Root
+internal/guard/      default deny, path checks, one os.Root per profile, audit record per call
+internal/audit/      JSONL audit log, trace and span IDs
+internal/approve/    yes/no approval gate with timeout
+internal/sessions/   SQLite history per chat
+internal/transport/  Transport interface; CLI (colors in style.go), web page (webpage/ embedded), Telegram, White Noise (wn-agent socket)
+docs/                PRD and reference architecture
+deploy/              setup.sh, LaunchDaemon plists, secrets.sh (used by make setup / push-secrets)
+```
+
+## Commands
+
+```sh
+make test              # go vet + unit tests
+make tunnel            # SSH tunnel to the host's Ollama (needs Makefile.local)
+make models            # create gostafson-qwen3.5-9b (32K context) on the host's Ollama (tunnel up)
+make test-integration  # unit + integration tests against the host's Ollama (tunnel up)
+make run               # CLI REPL with config.local.toml (tunnel up); ARGS=-v logs a line per turn
+make build             # dist/gostafson for darwin/arm64
+make setup             # run deploy/setup.sh on the host with sudo (agent user, dirs, wn-agent, LaunchDaemons)
+make push-config       # config.host.toml -> /usr/local/etc/gostafson/config.toml (root-owned)
+make push-secrets      # OPENROUTER_API_KEY, GOSTAFSON_TELEGRAM_TOKEN, GOSTAFSON_WEB_TOKEN from this shell to the host
+make deploy | rollback | versions | logs | service-status | service-log
+```
+
+Go is pinned in `.tool-versions` (mise). The local model is `gostafson-qwen3.5-9b` (`qwen3.5:9b` with a 32K context, PRD D15); thinking is off via `reasoning_effort: "none"` unless the message contains `think=true`.
