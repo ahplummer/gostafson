@@ -223,12 +223,11 @@ func (w *Web) send(rw http.ResponseWriter, r *http.Request) {
 		rw.WriteHeader(http.StatusNoContent)
 		return
 	}
-	w.publish(webEvent{Type: "user", Text: text})
-	if w.pending.Deliver(WebChat, text) {
-		w.publish(webEvent{Type: "answered", Text: text})
+	if w.pending.Deliver(WebChat, text) { // an answer: Ask publishes it with the question
 		rw.WriteHeader(http.StatusNoContent)
 		return
 	}
+	w.publish(webEvent{Type: "user", Text: text})
 	select {
 	case w.in <- Message{ChatID: WebChat, Sender: "web", Text: text}:
 		rw.WriteHeader(http.StatusNoContent)
@@ -287,7 +286,12 @@ func (w *Web) Ask(ctx context.Context, chatID, question string) (string, error) 
 	w.publish(webEvent{Type: "ask", Text: question})
 	ans, err := w.pending.Wait(ctx, chatID)
 	if err != nil {
-		w.publish(webEvent{Type: "answered", Text: "(no answer: treated as no)"})
+		ans = "(no answer: treated as no)"
 	}
-	return ans, err
+	// The page keeps the question and its answer in the chat.
+	w.publish(webEvent{Type: "answered", Text: ans})
+	if err != nil {
+		return "", err
+	}
+	return ans, nil
 }

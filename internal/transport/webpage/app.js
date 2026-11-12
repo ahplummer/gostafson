@@ -73,7 +73,7 @@ function stopSpin() {
   spinner.hidden = true;
 }
 
-let busy = false, asking = false;
+let busy = false, asking = false, question = "";
 function handle(e) {
   switch (e.type) {
     case "ready": conn.textContent = "connected"; conn.className = "ok"; break;
@@ -82,14 +82,14 @@ function handle(e) {
     case "busy": busy = true; if (!asking) startSpin(); break;
     case "idle": busy = false; stopSpin(); break;
     case "ask":
-      asking = true; stopSpin();
+      asking = true; stopSpin(); question = e.text;
       ask.querySelector(".q").textContent = e.text;
       ask.hidden = false;
       document.getElementById("yes").focus();
       break;
     case "answered":
       asking = false; ask.hidden = true;
-      if (e.text.startsWith("(")) add("note", e.text);
+      add("asked", question + " → " + e.text);
       if (busy) startSpin();
       break;
   }

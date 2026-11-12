@@ -37,6 +37,15 @@ type Guard struct {
 	log     *audit.Log
 }
 
+// notApproved is what the model is told when a tool call needs approval and
+// doesn't get it. Small models paraphrase vague errors ("an access
+// restriction"), so it says plainly what happened.
+var notApproved = map[approve.Result]string{
+	approve.Denied:      "The user said no to this.",
+	approve.Timeout:     "The user didn't answer the approval question in time, which counts as no.",
+	approve.Unavailable: "This needs the user's approval, and this chat can't ask for it.",
+}
+
 // New builds the guard for a profile. Every name in toolNames must be a known
 // tool. If any tools are allowed, rootDir is required; it is created (0700)
 // if missing and opened as an os.Root.
@@ -188,7 +197,7 @@ func (t *Turn) run(ctx context.Context, name, arguments string, rec *audit.ToolC
 			if result != approve.Approved {
 				rec.Guard = "deny"
 				rec.Reason = "not approved"
-				return "", fmt.Errorf("the owner did not approve this (%s); do not retry it unless asked", result)
+				return "", fmt.Errorf("%s Nothing was changed. Tell the user plainly that you didn't do it and why; don't retry unless they ask", notApproved[result])
 			}
 		}
 	}

@@ -12,8 +12,8 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 
 - M1 (chat over CLI with tag routing): done.
 - M2 (file tools, guard with `os.Root`, JSONL audit log): done.
-- M3 (cloud profile rules, OpenRouter data-collection preference, approval gate on the CLI): built; `@claude` checked live, `@cloud` not yet.
-- M4 (transports, `setup.sh`, LaunchDaemon, first deploy): in progress. CLI colors, web page, Telegram and White Noise done and tested live; deploy next.
+- M3 (cloud profile rules, OpenRouter data-collection preference, approval gate on the CLI): done; `@claude` and `@cloud` checked live.
+- M4 (transports, `setup.sh`, LaunchDaemon, first deploy): done. Deployed on the host as LaunchDaemons running as `agent`; CLI colors, web page, Telegram and White Noise tested live. `make rollback` and a reboot not yet exercised.
 
 ## Rules
 

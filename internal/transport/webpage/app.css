@@ -25,6 +25,8 @@ main { flex: 1; overflow-y: auto; padding: 8px 0; overscroll-behavior: contain; 
 .msg.user::before { content: "❯ "; font-weight: bold; }
 .msg.reply { border-left: 2px solid #3a3446; padding-left: 10px; }
 .msg.note { color: var(--muted); font-style: italic; }
+.msg.asked { color: var(--warn); }
+.msg.asked::before { content: "? "; font-weight: bold; }
 .footer { color: var(--muted); opacity: .7; font-size: 12px; display: block; margin-top: 4px; }
 .err { color: var(--err); }
 code { color: var(--code); }

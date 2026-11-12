@@ -19,7 +19,7 @@ Both projects deal with the same concerns: which model runs, what the agent may 
 | Models | Gemini by default; Claude and others via Model Garden under Google's terms | Local models by default; cloud models via OpenRouter only on request |
 | Cost shape | Pay per use for runtime, gateway, tokens; budget alerts | Local inference free; OpenRouter tokens with a credit limit |
 | Defined in | Terraform plus the ADK CLI | Go code, one TOML config, `setup.sh`, Makefile |
-| Status (2026-11-12) | Terraform baseline (APIs, bucket, dataset, IAM, budget); agent not deployed yet | M3 built: CLI chat, tag routing, sessions, file tools, guard, audit log, cloud profile rules, approval gate |
+| Status (2026-11-12) | Terraform baseline (APIs, bucket, dataset, IAM, budget); agent not deployed yet | M4 done and deployed: CLI, web page, Telegram and White Noise; tag routing, sessions, file tools, guard, audit log, cloud profile rules, approval gate |
 
 ---
 

@@ -10,7 +10,7 @@ A small, local-first agent harness for one Apple Silicon Mac, written in Go.
 
 It is meant to be small enough to read end to end. There is no agent framework and no general shell access.
 
-**Status:** early. Milestones 1 to 3 work, and M4 is under way (colored CLI, a web page for the tailnet, a Telegram bot, White Noise through `wn-agent`): chat over a CLI with tag routing and per-chat history; file tools for `@code` confined to one directory with `os.Root`; a JSONL audit log of every turn and tool call; cloud profiles over OpenRouter with text-only history and `data_collection: deny`; a yes/no prompt before a file is overwritten. See [docs/PRD.md](docs/PRD.md) for the milestones.
+**Status:** early. Milestones 1 to 4 work (colored CLI, a web page for the tailnet, a Telegram bot, White Noise through `wn-agent`, running on the host as LaunchDaemons under a dedicated `agent` user): chat over a CLI with tag routing and per-chat history; file tools for `@code` confined to one directory with `os.Root`; a JSONL audit log of every turn and tool call; cloud profiles over OpenRouter with text-only history and `data_collection: deny`; a yes/no prompt before a file is overwritten. See [docs/PRD.md](docs/PRD.md) for the milestones.
 
 ## Requirements
 

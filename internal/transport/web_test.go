@@ -145,7 +145,7 @@ func TestWebMessagesAndApproval(t *testing.T) {
 			break
 		}
 	}
-	if got := strings.Join(types, ","); got != "user,ask,user,answered,busy,idle,reply,ready" {
+	if got := strings.Join(types, ","); got != "user,ask,answered,busy,idle,reply,ready" {
 		t.Errorf("events = %s", got)
 	}
 }
