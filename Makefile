@@ -61,14 +61,33 @@ test-integration:
 	GOSTAFSON_TEST_BASE_URL=http://localhost:$(TUNNEL_OLLAMA_PORT)/v1 go test -tags integration -count=1 ./...
 
 # Copy a versioned binary, point `current` at it, restart, prune old versions.
+# The copy lands under a temporary name and is renamed into place, so a
+# launch never sees a half-copied file. After the restart, deploy waits for
+# the same pid twice in a row: macOS refuses the first launch of each new
+# build ("Launch Constraint Violation", launchd then drops the job) until
+# Background Task Management refreshes its record ~10 s later. If the job
+# was dropped it is loaded again; old builds are pruned only once the new
+# one runs.
 deploy: check-host test build
-	scp $(BIN) $(DEPLOY_HOST):$(REMOTE_DIR)/gostafson-$(VERSION)
+	scp $(BIN) $(DEPLOY_HOST):$(REMOTE_DIR)/.gostafson-$(VERSION).partial
 	ssh -t $(DEPLOY_HOST) 'set -e; cd $(REMOTE_DIR); \
+	  mv -f .gostafson-$(VERSION).partial gostafson-$(VERSION); \
 	  ln -sfn gostafson-$(VERSION) current; \
 	  launchctl print $(SERVICE) >/dev/null 2>&1 || sudo launchctl bootstrap system $(PLIST); \
 	  sudo launchctl kickstart -k $(SERVICE); \
+	  ok=; prev=; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do \
+	    sleep 2; \
+	    if ! launchctl print $(SERVICE) >/dev/null 2>&1; then \
+	      echo "  launchd dropped the service (first launch of a new build); loading it again"; \
+	      sudo -n launchctl bootstrap system $(PLIST) 2>/dev/null || true; prev=; continue; \
+	    fi; \
+	    pid=$$(launchctl print $(SERVICE) | sed -n "s/^[[:space:]]*pid = //p" | head -1); \
+	    if [ -n "$$pid" ] && [ "$$pid" = "$$prev" ]; then ok=1; break; fi; \
+	    prev=$$pid; \
+	  done; \
+	  [ -n "$$ok" ] || { echo "gostafson-$(VERSION) is not running after 30 s; see make service-log"; exit 1; }; \
 	  ls -t gostafson-* | tail -n +$$(($(KEEP)+1)) | xargs rm -f; \
-	  echo "deployed gostafson-$(VERSION)"'
+	  echo "deployed gostafson-$(VERSION) (running, pid $$pid)"'
 
 # Point `current` at the version deployed before the one it points to now.
 rollback:

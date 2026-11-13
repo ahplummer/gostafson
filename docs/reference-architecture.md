@@ -376,7 +376,7 @@ The `agent` user can execute the binaries and read its config, but can't modify 
 | Target | Does |
 |---|---|
 | `make test` | `go vet`, `go test` |
-| `make deploy` | Checks `DEPLOY_HOST`, runs tests, builds, copies `gostafson-<sha>`, switches `current`, restarts the daemon, keeps the newest 5 |
+| `make deploy` | Checks `DEPLOY_HOST`, runs tests, builds, copies `gostafson-<sha>` (to a temporary name, then renamed), switches `current`, restarts the daemon and waits until the same pid is seen twice, keeping the newest 5 only once it runs. macOS refuses the first launch of each new build (AMFI "Launch Constraint Violation"; launchd drops the job) until Background Task Management refreshes its record about 10 s later; deploy loads the job again if it was dropped, and fails after 30 s if it still isn't running |
 | `make rollback` | Points `current` at the version deployed before the current one, restarts |
 | `make versions` | Lists deployed versions and what `current` points to |
 | `make logs` | Tails the audit log on the host (with sudo: only `agent` can read it) |
