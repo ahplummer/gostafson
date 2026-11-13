@@ -164,6 +164,7 @@ It is also a learning project: every piece should be code the owner wrote and un
 - `run` executes allowlisted argv inside the jail; others go to approval.
 - Golden set in `evals/` covers each profile; coding model chosen by tool-call reliability and speed.
 - Speed is measured per tool step, and each candidate is checked for Ollama prompt-cache reuse (the same prompt sent twice: the second call should evaluate almost no prompt tokens). `qwen3.5:9b` doesn't reuse the cache, so every tool step re-reads the whole prompt (~1,700 tokens, ~4 s on the host); `mistral:7b` does (0.02 s). Measured 2026-11-12.
+- Status (2026-11-12): in progress. `gostafson-eval` (`make eval`) runs 14 golden cases in `evals/cases.toml` (chat, list/read/search, create, approved and denied overwrite, multi-step edit, missing file, path outside the root, prompt injection in a file) on a fresh copy of `evals/fixtures/site` per case, and reports pass rate, model-call time, turn time and prompt-cache reuse. Results, one run each unless noted: `qwen3.5:9b` 42/42 (3 runs; median model call 2.0 s, mean turn 6.3 s, cache not reused); `qwen3:8b` 39/42 (3 runs; 0.8 s, 2.5 s, cache reused; failed the same case each time by searching instead of reading the file); `qwen2.5:14b` 9/14 (followed the injection); `gemma4:e2b` 8/14 (followed the injection: wrote `pwned.txt`); `llama3.2:3b` 6/14; `mistral:7b` 3/14; `phi4-mini` 3/14 (invented a `/etc/passwd` line). Next: the `run` tool.
 
 **M6: Decision routing**
 - 50–100 real messages labeled from the audit log.
@@ -183,8 +184,8 @@ It is also a learning project: every piece should be code the owner wrote and un
 | Coding model: `qwen3-coder:30b` (needs model swapping) or `qwen2.5-coder:14b` (tool calls less reliable); prompt-cache reuse is a criterion (M5) | M5 |
 | GPU wired-memory limit on the host, and whether to raise it | M5 |
 | How Hermes and the harness share Ollama without memory contention | M5 |
-| Images in messages (vision on `qwen3.5:9b`): which milestone | M4 |
-| CLI line editing: `/` command hints and tab completion need raw terminal input (`golang.org/x/term` or similar, a new dependency) | M4 |
+| Images in messages on every transport, the CLI included (web upload, Telegram photo, White Noise media, CLI file path or clipboard paste); vision on `qwen3.5:9b`; whether images may go to cloud profiles | after M5 |
+| CLI line editing: `/` command hints and tab completion need raw terminal input (`golang.org/x/term` or similar, a new dependency) | later |
 
 ## 11. Risks
 

@@ -14,6 +14,7 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 - M2 (file tools, guard with `os.Root`, JSONL audit log): done.
 - M3 (cloud profile rules, OpenRouter data-collection preference, approval gate on the CLI): done; `@claude` and `@cloud` checked live.
 - M4 (transports, `setup.sh`, LaunchDaemon, first deploy): done. Deployed on the host as LaunchDaemons running as `agent`; CLI colors, web page, Telegram and White Noise tested live. `make rollback` and a reboot tested.
+- M5 (command tool and evals): in progress. Eval harness done (`make eval`); `qwen3.5:9b` stays the model for now. Next: the `run` tool.
 
 ## Rules
 
@@ -30,6 +31,7 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 ## Layout
 
 ```
+cmd/gostafson-eval/  golden-case runner: pass rate, speed, prompt-cache reuse per model
 cmd/gostafson/       main.go: wiring, flags, turn handling; serve.go: transports and per-chat workers; commands.go: /help /profiles /status /reset
 internal/config/     TOML config; API keys from env vars (dev) or a 0600 secrets file (host)
 internal/client/     OpenAI-compatible chat completions client (net/http)
@@ -40,6 +42,7 @@ internal/guard/      default deny, path checks, one os.Root per profile, audit r
 internal/audit/      JSONL audit log, trace and span IDs
 internal/approve/    yes/no approval gate with timeout
 internal/sessions/   SQLite history per chat
+internal/evals/      eval cases (TOML), one turn per case in a fresh fixture copy, checks
 internal/transport/  Transport interface; CLI (colors in style.go), web page (webpage/ embedded), Telegram, White Noise (wn-agent socket)
 docs/                PRD and reference architecture
 deploy/              setup.sh, LaunchDaemon plists, secrets.sh (used by make setup / push-secrets)
@@ -51,6 +54,7 @@ deploy/              setup.sh, LaunchDaemon plists, secrets.sh (used by make set
 make test              # go vet + unit tests
 make tunnel            # SSH tunnel to the host's Ollama (needs Makefile.local)
 make models            # create gostafson-qwen3.5-9b (32K context) on the host's Ollama (tunnel up)
+make eval              # golden cases in evals/ against the host's models (tunnel up); MODELS=a,b EVAL_ARGS="-n 3"
 make test-integration  # unit + integration tests against the host's Ollama (tunnel up)
 make run               # CLI REPL with config.local.toml (tunnel up); ARGS=-v logs a line per turn
 make build             # dist/gostafson for darwin/arm64

@@ -20,7 +20,7 @@ TUNNEL_LMS_PORT    ?= 1234
 VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev)
 BIN     := dist/gostafson
 
-.PHONY: build test test-integration run tunnel models deploy rollback push-secrets push-config setup versions logs service-log service-status clean check-host
+.PHONY: build test eval test-integration run tunnel models deploy rollback push-secrets push-config setup versions logs service-log service-status clean check-host
 
 # Fails fast, before test and build, when DEPLOY_HOST is missing.
 check-host:
@@ -51,6 +51,11 @@ models:
 	curl -fsS http://localhost:$(TUNNEL_OLLAMA_PORT)/api/create \
 	  -d '{"model":"gostafson-qwen3.5-9b","from":"qwen3.5:9b","parameters":{"num_ctx":32768},"stream":false}'
 	@echo
+
+# Golden cases against the host's models (tunnel up). MODELS=a,b to compare;
+# EVAL_ARGS="-only code- -n 3" for more.
+eval:
+	go run ./cmd/gostafson-eval -config config.local.toml $(if $(MODELS),-models $(MODELS)) $(EVAL_ARGS)
 
 test-integration:
 	GOSTAFSON_TEST_BASE_URL=http://localhost:$(TUNNEL_OLLAMA_PORT)/v1 go test -tags integration -count=1 ./...

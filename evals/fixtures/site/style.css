@@ -1,0 +1,7 @@
+body {
+  font-family: system-ui, sans-serif;
+  background: #ffffff;
+  color: #222222;
+  margin: 2rem;
+}
+#events li { margin: 0.25rem 0; }

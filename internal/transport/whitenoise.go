@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,12 +39,27 @@ type WhiteNoise struct {
 	subConn net.Conn
 	subID   string
 	pending Pending
+
+	order       sync.Mutex
+	notBefore   map[string]time.Time // per chat: earliest send that sorts after the last message
+	loggedClock bool
 }
 
 const (
 	wnProtocol = "marmot.agent-control.v2"
 	wnPrefix   = "wn:"
 	wnMaxFrame = 1 << 20
+)
+
+// White Noise orders a chat by each message's created_at, in whole seconds,
+// stamped by the sender's device. A phone clock that runs a second or two
+// ahead makes a fast reply sort above the message it answers. So a reply is
+// held until its timestamp is a whole second later than the message's. When
+// the message carries no timestamp, the reply is held until wnMinGap after
+// it arrived. wnMaxHold caps the wait for a clock that is far off.
+var (
+	wnMinGap  = 3 * time.Second
+	wnMaxHold = 5 * time.Second
 )
 
 // NewWhiteNoise returns a transport for the wn-agent at socket. allowed holds
@@ -260,6 +277,7 @@ func (w *WhiteNoise) Receive(ctx context.Context) (Message, error) {
 		if !ok {
 			continue
 		}
+		w.noteArrival(m.ChatID, ev)
 		if w.pending.Deliver(m.ChatID, m.Text) {
 			continue
 		}
@@ -284,11 +302,92 @@ func (w *WhiteNoise) parse(ev map[string]any) (Message, bool) {
 	return Message{ChatID: wnPrefix + strings.ToLower(group), Sender: from, Text: text}, true
 }
 
+// noteArrival records when a reply in chat may be sent (see wnMinGap).
+func (w *WhiteNoise) noteArrival(chat string, ev map[string]any) {
+	now := time.Now()
+	at, field := createdAt(ev)
+	until := now.Add(wnMinGap)
+	if !at.IsZero() {
+		until = time.Unix(at.Unix()+1, 0) // the next whole second after the message's
+	}
+	if limit := now.Add(wnMaxHold); until.After(limit) {
+		until = limit
+	}
+	w.order.Lock()
+	defer w.order.Unlock()
+	if w.notBefore == nil {
+		w.notBefore = map[string]time.Time{}
+	}
+	w.notBefore[chat] = until
+	if !w.loggedClock {
+		w.loggedClock = true
+		if at.IsZero() {
+			msg, _ := ev["message"].(map[string]any)
+			w.log.Warn("whitenoise message has no timestamp; replies wait "+wnMinGap.String(), "message_fields", slices.Sorted(maps.Keys(msg)))
+		} else {
+			w.log.Warn("whitenoise sender clock (logged once)", "field", field, "ahead_by", at.Sub(now).Round(100*time.Millisecond))
+		}
+	}
+}
+
+// createdAt finds the message's timestamp in an inbound event, in seconds or
+// milliseconds since 1970, and names the field it came from.
+func createdAt(ev map[string]any) (time.Time, string) {
+	msg, _ := ev["message"].(map[string]any)
+	for _, src := range []struct {
+		m   map[string]any
+		pre string
+	}{{msg, "message."}, {ev, ""}} {
+		for _, k := range []string{"created_at", "created_at_unix", "timestamp", "sent_at"} {
+			var n float64
+			switch v := src.m[k].(type) {
+			case float64:
+				n = v
+			case string:
+				f, err := strconv.ParseFloat(v, 64)
+				if err != nil {
+					continue
+				}
+				n = f
+			default:
+				continue
+			}
+			if n > 1e12 {
+				n /= 1000 // milliseconds
+			}
+			if n > 1e9 {
+				return time.Unix(int64(n), 0), src.pre + k
+			}
+		}
+	}
+	return time.Time{}, ""
+}
+
+// hold waits until a reply in chat sorts after the message it answers.
+func (w *WhiteNoise) hold(ctx context.Context, chat string) error {
+	w.order.Lock()
+	until := w.notBefore[chat]
+	w.order.Unlock()
+	d := time.Until(until)
+	if d <= 0 {
+		return nil
+	}
+	select {
+	case <-time.After(d):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Send implements Transport.
 func (w *WhiteNoise) Send(ctx context.Context, chatID, text string) error {
 	group, ok := strings.CutPrefix(chatID, wnPrefix)
 	if !ok {
 		return fmt.Errorf("not a whitenoise chat: %q", chatID)
+	}
+	if err := w.hold(ctx, chatID); err != nil {
+		return err
 	}
 	if err := w.resolveAccount(ctx); err != nil {
 		return err

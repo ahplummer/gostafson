@@ -200,3 +200,64 @@ func TestPubkeyHex(t *testing.T) {
 		t.Error("no allowed senders: expected error")
 	}
 }
+
+// A reply is held until its timestamp (whole seconds, host clock) is later
+// than the message's, which the sender's clock stamped, so it sorts below it.
+func TestWhiteNoiseReplySortsAfterMessage(t *testing.T) {
+	f := newFakeAgent(t)
+	w := newTestWN(t, f)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// The phone's clock is 1.6 s ahead.
+	ev := inbound(owner, "tell me a joke")
+	stamp := time.Now().Add(1600 * time.Millisecond).Unix()
+	ev["message"].(map[string]any)["created_at"] = float64(stamp)
+	f.events <- ev
+	m, err := w.Receive(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Send(ctx, m.ChatID, "a joke"); err != nil {
+		t.Fatal(err)
+	}
+	if sent := time.Now().Unix(); sent <= stamp {
+		t.Errorf("reply sent at %d, not after the message's %d", sent, stamp)
+	}
+
+	// Without a timestamp the reply waits wnMinGap after arrival.
+	wnMinGap = 300 * time.Millisecond
+	defer func() { wnMinGap = 3 * time.Second }()
+	f.events <- inbound(owner, "again")
+	if m, err = w.Receive(ctx); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	w.Send(ctx, m.ChatID, "again")
+	if d := time.Since(start); d < 250*time.Millisecond {
+		t.Errorf("reply without a timestamp sent after %v", d)
+	}
+}
+
+func TestCreatedAt(t *testing.T) {
+	for _, tc := range []struct {
+		ev    map[string]any
+		want  int64
+		field string
+	}{
+		{map[string]any{"message": map[string]any{"created_at": float64(1_800_000_000)}}, 1_800_000_000, "message.created_at"},
+		{map[string]any{"message": map[string]any{"timestamp": float64(1_800_000_000_123)}}, 1_800_000_000, "message.timestamp"},
+		{map[string]any{"created_at": "1800000000"}, 1_800_000_000, "created_at"},
+		{map[string]any{"message": map[string]any{"created_at": float64(5)}}, 0, ""},
+		{map[string]any{}, 0, ""},
+	} {
+		at, field := createdAt(tc.ev)
+		got := int64(0)
+		if !at.IsZero() {
+			got = at.Unix()
+		}
+		if got != tc.want || field != tc.field {
+			t.Errorf("createdAt(%v) = %d %q, want %d %q", tc.ev, got, field, tc.want, tc.field)
+		}
+	}
+}
