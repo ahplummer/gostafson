@@ -46,6 +46,7 @@ func (a *app) help(chatID string) string {
   /status    version, history size, model servers
   /reset     clear this chat's history and go back to @%[3]s, no project
   /projects  list projects; /project <name> attaches one, /project off detaches
+  /project cloud on|off   let cloud profiles use the attached project (off by default)
   /project new <name>   create a project; send files with the caption /add to add sources
   /help      this list
   /exit      quit (CLI only; also /quit or Ctrl-D)

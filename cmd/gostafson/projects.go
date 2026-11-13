@@ -79,6 +79,22 @@ func (a *app) projectCommand(ctx context.Context, chat, text string) string {
 	case "off", "none":
 		a.setProject(chat, "")
 		return "project detached"
+	case "cloud":
+		p := a.project(chat)
+		if p == nil {
+			return "attach a project first: /project <name>"
+		}
+		if len(f) < 3 || (f[2] != "on" && f[2] != "off") {
+			st, _ := p.Settings()
+			return fmt.Sprintf("cloud access for %s is %s; /project cloud on|off changes it", p.Name, map[bool]string{true: "on", false: "off"}[st.Cloud])
+		}
+		if err := p.SetCloud(f[2] == "on"); err != nil {
+			return "error: " + err.Error()
+		}
+		if f[2] == "on" {
+			return fmt.Sprintf("cloud access on: cloud profiles (@sonnet, @opus, ...) now get %s's instructions, memory and passages, and its search, read and remember tools; that text goes to OpenRouter", p.Name)
+		}
+		return fmt.Sprintf("cloud access off: cloud profiles no longer see %s", p.Name)
 	case "new":
 		if len(f) < 3 {
 			return "usage: /project new <name>"
@@ -110,9 +126,9 @@ func (a *app) projectCommand(ctx context.Context, chat, text string) string {
 		}
 		st, _ := p.Settings()
 		if st.Cloud {
-			b.WriteString("\ncloud profiles can search it (cloud = true)")
+			b.WriteString("\ncloud profiles can use it too (/project cloud off to stop)")
 		} else {
-			b.WriteString("\nlocal profiles only; cloud profiles don't see it (cloud = true in project.toml allows them)")
+			b.WriteString("\nlocal profiles only (/project cloud on lets cloud profiles use it)")
 		}
 		b.WriteString("\n/project off to detach")
 		return b.String()

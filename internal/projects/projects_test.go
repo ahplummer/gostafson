@@ -92,9 +92,21 @@ func TestProjectBasics(t *testing.T) {
 	if st, _ := p.Settings(); st.Cloud {
 		t.Error("cloud on by default")
 	}
-	os.WriteFile(filepath.Join(p.Dir, "project.toml"), []byte("cloud = true\n"), 0o600)
+	if err := p.SetCloud(true); err != nil {
+		t.Fatal(err)
+	}
 	if st, _ := p.Settings(); !st.Cloud {
-		t.Error("cloud = true not read")
+		t.Error("cloud on not saved")
+	}
+	if b, _ := os.ReadFile(filepath.Join(p.Dir, "project.toml")); !strings.Contains(string(b), "cloud = true") {
+		t.Errorf("project.toml = %s", b)
+	}
+	p.SetCloud(false)
+	if st, _ := p.Settings(); st.Cloud {
+		t.Error("cloud off not saved")
+	}
+	if _, ok := p.Tools()["remember"]; !ok {
+		t.Error("no remember tool")
 	}
 	if err := p.Remember("2023 Travato 59K on a Ram ProMaster 3500"); err != nil {
 		t.Fatal(err)

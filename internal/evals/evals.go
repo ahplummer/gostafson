@@ -241,7 +241,7 @@ func Run(ctx context.Context, env Env, cs Case) Result {
 			pp := *p
 			pp.SystemPrompt = strings.TrimSpace(pp.SystemPrompt + "\n\n" + proj.Context(ctx, true) + proj.Passages(ctx, input))
 			tp = &pp
-			tools.inner = g.ForTurn("eval", "", "", ap).With(proj.Tools(p.Remote()))
+			tools.inner = g.ForTurn("eval", "", "", ap).With(proj.Tools())
 		}
 		turn := loop.Turn{Profile: tp, History: sessions.LabelOthers(slices.Clone(history), name, models), Input: input, MaxSteps: env.MaxSteps}
 		if i == 0 {

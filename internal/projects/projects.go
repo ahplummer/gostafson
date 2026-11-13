@@ -148,6 +148,26 @@ type Settings struct {
 	Cloud bool `toml:"cloud"`
 }
 
+// SetCloud turns cloud access on or off in project.toml.
+func (p *Project) SetCloud(on bool) error {
+	st, err := p.Settings()
+	if err != nil {
+		return err
+	}
+	st.Cloud = on
+	var b strings.Builder
+	b.WriteString("# Project settings (PRD D37). cloud = true lets cloud profiles see this project.\n")
+	if err := toml.NewEncoder(&b).Encode(st); err != nil {
+		return err
+	}
+	path := filepath.Join(p.Dir, "project.toml")
+	tmp := path + ".partial"
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 // Settings reads project.toml; a missing file means the defaults.
 func (p *Project) Settings() (Settings, error) {
 	var st Settings

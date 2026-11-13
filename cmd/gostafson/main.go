@@ -278,7 +278,7 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	if p := a.project(msg.ChatID); p != nil {
 		st, _ := p.Settings()
 		if profile.Remote() && !st.Cloud {
-			added += fmt.Sprintf("[project %s isn't shared with cloud profiles; set cloud = true in its project.toml to allow it]\n", p.Name)
+			added += fmt.Sprintf("[project %s isn't shared with cloud profiles; /project cloud on allows it]\n", p.Name)
 		} else {
 			proj = p
 			if rep, err := p.Index.Sync(ctx, nil); err == nil && len(rep.Failed) > 0 {
@@ -299,7 +299,7 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	}
 	tools := a.guards[route.Profile].ForTurn(msg.ChatID, traceID, spanID, approve.New(asker, a.cfg.Approval.Timeout))
 	if proj != nil {
-		tools = tools.With(proj.Tools(profile.Remote())) // cloud profiles: search and read only
+		tools = tools.With(proj.Tools())
 	}
 	start := time.Now()
 	res, err := loop.Run(turnCtx, a.clients[route.Profile], tools, loop.Turn{

@@ -12,9 +12,9 @@ import (
 )
 
 // Tools returns the project's tools for a turn: project_search and
-// project_read (read-only), and remember unless readOnly (a cloud profile
-// gets only the two read-only ones).
-func (p *Project) Tools(readOnly bool) map[string]tools.Tool {
+// project_read, and remember, which asks the owner before saving (for cloud
+// profiles too, when the project allows them: PRD D37).
+func (p *Project) Tools() map[string]tools.Tool {
 	t := map[string]tools.Tool{
 		"project_search": {Def: def("project_search",
 			"Search this project's sources (manuals, notes, screenshots) for passages about a question. Returns the best passages with source and page. Search before answering project questions; try other words if nothing fits.",
@@ -25,12 +25,10 @@ func (p *Project) Tools(readOnly bool) map[string]tools.Tool {
 			`{"type":"object","properties":{"source":{"type":"string","description":"Source name as listed (e.g. \"Owner's Manual.pdf\")."},"page":{"type":"integer","description":"Page number (from 1; 0 for text files and images)."}},"required":["source"]}`),
 			Run: p.readTool},
 	}
-	if !readOnly {
-		t["remember"] = tools.Tool{Def: def("remember",
-			"Save a lasting fact about this project to its memory (for example the model year, a part number, a preference). The user is asked first. Not for passing remarks.",
-			`{"type":"object","properties":{"fact":{"type":"string","description":"One fact in one sentence."}},"required":["fact"]}`),
-			Run: p.rememberTool, Confirm: p.confirmRemember}
-	}
+	t["remember"] = tools.Tool{Def: def("remember",
+		"Save a lasting fact about this project to its memory (for example the model year, a part number, a preference). The user is asked first. Not for passing remarks.",
+		`{"type":"object","properties":{"fact":{"type":"string","description":"One fact in one sentence."}},"required":["fact"]}`),
+		Run: p.rememberTool, Confirm: p.confirmRemember}
 	return t
 }
 
