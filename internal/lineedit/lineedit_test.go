@@ -113,6 +113,11 @@ func TestClipboardImage(t *testing.T) {
 	if len(lines) != 1 || lines[0].Text != "what is [image #1]?" || len(lines[0].Images) != 1 || string(lines[0].Images[0].Data) != string(png) {
 		t.Fatalf("lines = %+v", lines)
 	}
+	// ⌘V in a terminal that sends an empty bracketed paste for an image.
+	lines, _ = run(t, e, Options{}, "see \x1b[200~\x1b[201~\r")
+	if len(lines) != 1 || lines[0].Text != "see [image #1]" || len(lines[0].Images) != 1 {
+		t.Fatalf("empty paste: %+v", lines)
+	}
 	// Deleting the marker drops the image.
 	lines, _ = run(t, e, Options{}, "\x16\x17\x17\x17x\r")
 	if len(lines) != 1 || len(lines[0].Images) != 0 {

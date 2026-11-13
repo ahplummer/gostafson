@@ -32,6 +32,10 @@ const (
 	MaxBytes  = 20 << 20 // largest image accepted from a transport
 	MaxSide   = 1568     // longest side sent to the model, in pixels
 	MaxImages = 4        // images per message
+	// MinSide: thinner images are padded to it. Qwen's vision encoder needs
+	// both sides >= 32 px, and Ollama's runner crashes on less (a one-line
+	// text screenshot is 724x31).
+	MinSide = 64
 )
 
 // Image is one prepared image.
@@ -88,6 +92,16 @@ func Prepare(ctx context.Context, name string, data []byte) (Image, error) {
 		if out, err := sips(ctx, im.Data, im.MediaType, false, true); err == nil {
 			im.Data = out
 		} // if scaling fails, send it as is: the server can still read it
+		if c, _, err := image.DecodeConfig(bytes.NewReader(im.Data)); err == nil {
+			cfg = c
+		}
+	}
+	if min(cfg.Width, cfg.Height) < MinSide {
+		out, err := pad(ctx, im.Data, im.MediaType, max(cfg.Width, MinSide), max(cfg.Height, MinSide))
+		if err != nil {
+			return Image{}, fmt.Errorf("%s is %dx%d, too thin for the model, and padding it failed: %v", im.Name, cfg.Width, cfg.Height, err)
+		}
+		im.Data = out
 	}
 	return im, nil
 }
@@ -113,8 +127,24 @@ func displayName(name string) string {
 	return name
 }
 
+// pad centers the image on a white canvas of w x h.
+func pad(ctx context.Context, data []byte, mt string, w, h int) ([]byte, error) {
+	return runSips(ctx, data, mt, false, "-p", fmt.Sprint(h), fmt.Sprint(w), "--padColor", "FFFFFF")
+}
+
 // sips converts and/or scales an image through temporary files.
 func sips(ctx context.Context, data []byte, mt string, toPNG, scale bool) ([]byte, error) {
+	var args []string
+	if toPNG {
+		args = append(args, "-s", "format", "png")
+	}
+	if scale {
+		args = append(args, "-Z", fmt.Sprint(MaxSide))
+	}
+	return runSips(ctx, data, mt, toPNG, args...)
+}
+
+func runSips(ctx context.Context, data []byte, mt string, toPNG bool, args ...string) ([]byte, error) {
 	if _, err := os.Stat(Sips); err != nil {
 		return nil, errors.New("can't resize or convert images here (no sips)")
 	}
@@ -130,13 +160,6 @@ func sips(ctx context.Context, data []byte, mt string, toPNG, scale bool) ([]byt
 	}
 	if err := os.WriteFile(in, data, 0o600); err != nil {
 		return nil, err
-	}
-	args := []string{}
-	if toPNG {
-		args = append(args, "-s", "format", "png")
-	}
-	if scale {
-		args = append(args, "-Z", fmt.Sprint(MaxSide))
 	}
 	args = append(args, in, "--out", out)
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

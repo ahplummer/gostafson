@@ -89,6 +89,7 @@ func Run(ctx context.Context, c Chatter, tools Tools, t Turn) (Result, error) {
 
 		msg := reply.Message
 		msg.Role = "assistant"
+		msg.Profile = t.Profile.Name
 		msgs = append(msgs, msg)
 		res.New = append(res.New, msg)
 

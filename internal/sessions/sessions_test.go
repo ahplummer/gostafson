@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -173,5 +174,49 @@ func TestImagesStoredAsRefs(t *testing.T) {
 	got, _ := s.Recent(ctx, "c", 10)
 	if len(got) != 1 || len(got[0].ImageRefs) != 1 || got[0].Images != nil {
 		t.Errorf("recent = %+v", got)
+	}
+}
+
+func TestLabelOthers(t *testing.T) {
+	msgs := []client.Message{
+		{Role: "user", Content: "what color is this?"},
+		{Role: "assistant", Content: "Red.", Profile: "default"},
+		{Role: "user", Content: "@opus what is it?"},
+		{Role: "assistant", Content: "A square.", Profile: "opus"},
+		{Role: "assistant", Content: "Old reply.", Profile: ""}, // saved before profiles were recorded
+		{Role: "assistant", Content: "", Profile: "code", ToolCalls: []client.ToolCall{{ID: "1"}}},
+	}
+	got := LabelOthers(msgs, "opus", map[string]string{"default": "gostafson-qwen3.5-9b"})
+	want := []string{
+		"what color is this?",
+		"[reply from @default (gostafson-qwen3.5-9b), a different model, not you]\nRed.",
+		"@opus what is it?",
+		"A square.",
+		"Old reply.",
+		"",
+	}
+	for i, w := range want {
+		if got[i].Content != w {
+			t.Errorf("message %d = %q, want %q", i, got[i].Content, w)
+		}
+	}
+}
+
+// The profile is stored with history, survives TextOnly, and never goes on
+// the wire.
+func TestProfileStoredNotSent(t *testing.T) {
+	s, _ := open(t)
+	ctx := context.Background()
+	s.Append(ctx, "c", client.Message{Role: "user", Content: "hi"}, client.Message{Role: "assistant", Content: "hello", Profile: "luna"})
+	got, _ := s.Recent(ctx, "c", 10)
+	if len(got) != 2 || got[1].Profile != "luna" {
+		t.Fatalf("recent = %+v", got)
+	}
+	if to := TextOnly(got); to[1].Profile != "luna" {
+		t.Errorf("TextOnly lost the profile: %+v", to[1])
+	}
+	wire, _ := json.Marshal(got[1])
+	if strings.Contains(string(wire), "luna") {
+		t.Errorf("profile on the wire: %s", wire)
 	}
 }

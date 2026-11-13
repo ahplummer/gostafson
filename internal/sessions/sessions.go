@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ahplummer/gostafson/internal/client"
@@ -151,15 +152,34 @@ func TextOnly(msgs []client.Message) []client.Message {
 			if text == "" {
 				continue
 			}
-			if n := len(out); n > 0 && out[n-1].Role == "assistant" {
+			if n := len(out); n > 0 && out[n-1].Role == "assistant" && out[n-1].Profile == m.Profile {
 				out[n-1].Content = joinText(out[n-1].Content, text)
 				continue
 			}
-			m = client.Message{Role: "assistant", Content: text}
+			m = client.Message{Role: "assistant", Content: text, Profile: m.Profile}
 		}
 		out = append(out, m)
 	}
 	return out
+}
+
+// LabelOthers marks replies written by a profile other than current, so a
+// model doesn't take another model's answers as its own: it would defend
+// them, or "correct" ones it couldn't have made (an image it never saw, a
+// web search it can't do). models maps profile names to model names; replies
+// saved before profiles were recorded stay unlabeled (PRD D36).
+func LabelOthers(msgs []client.Message, current string, models map[string]string) []client.Message {
+	for i, m := range msgs {
+		if m.Role != "assistant" || m.Profile == "" || m.Profile == current || strings.TrimSpace(m.Content) == "" {
+			continue
+		}
+		who := "@" + m.Profile
+		if model := models[m.Profile]; model != "" {
+			who += " (" + model + ")"
+		}
+		msgs[i].Content = "[reply from " + who + ", a different model, not you]\n" + m.Content
+	}
+	return msgs
 }
 
 // toolNote describes a tool call without its arguments' contents: the tool

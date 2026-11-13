@@ -68,6 +68,9 @@ func TestPlainReply(t *testing.T) {
 	if res.Reply != "hi" || res.Steps != 1 || len(res.New) != 2 {
 		t.Errorf("result = %+v", res)
 	}
+	if p := res.New[1].Profile; p != profile(true).Name || p == "" {
+		t.Errorf("reply's profile = %q", p) // saved with history for labels (PRD D36)
+	}
 	req := f.reqs[0]
 	if req.ReasoningEffort != "none" {
 		t.Errorf("think toggle off should send reasoning_effort=none, got %q", req.ReasoningEffort)

@@ -21,6 +21,7 @@ import (
 	"github.com/ahplummer/gostafson/internal/loop"
 	"github.com/ahplummer/gostafson/internal/media"
 	"github.com/ahplummer/gostafson/internal/router"
+	"github.com/ahplummer/gostafson/internal/sessions"
 )
 
 // Case is one golden test. Text checks ignore case.
@@ -203,7 +204,13 @@ func Run(ctx context.Context, env Env, cs Case) Result {
 			guards[name] = g
 		}
 		tools := &recorder{inner: g.ForTurn("eval", "", "", ap), ap: ap, r: &r}
-		turn := loop.Turn{Profile: p, History: history, Input: input, MaxSteps: env.MaxSteps}
+		models := map[string]string{}
+		for n, ep := range env.Profiles {
+			models[n] = ep.Model
+		}
+		// Label other profiles' replies as the chat does (PRD D36), on a copy:
+		// the next turn may be a different profile.
+		turn := loop.Turn{Profile: p, History: sessions.LabelOthers(slices.Clone(history), name, models), Input: input, MaxSteps: env.MaxSteps}
 		if i == 0 {
 			turn.Images = ims
 		}

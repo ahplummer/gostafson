@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -165,8 +166,21 @@ func (c *CLI) receiveEdited(ctx context.Context) (Message, error) {
 		case "/exit", "/quit":
 			return Message{}, io.EOF
 		}
-		return Message{ChatID: c.ChatID, Sender: "local", Text: l.Text, Images: l.Images}, nil
+		return Message{ChatID: c.ChatID, Sender: "local", Text: tagFirst(l.Text), Images: l.Images}, nil
 	}
+}
+
+var leadingImages = regexp.MustCompile(`^((?:\[image #\d+\]\s*)+)(@\S+)\s*`)
+
+// tagFirst moves a tag typed right after pasted images to the front, so
+// "[image #1] @opus what is this?" goes to @opus: after ⌘V the marker comes
+// first, and tags only count at the start of a message.
+func tagFirst(text string) string {
+	m := leadingImages.FindStringSubmatch(text)
+	if m == nil {
+		return text
+	}
+	return m[2] + " " + strings.TrimSpace(m[1]) + " " + text[len(m[0]):]
 }
 
 // Send writes text followed by a blank line.

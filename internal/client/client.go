@@ -29,10 +29,16 @@ type Message struct {
 	// records which images a message had (PRD D34).
 	Images    []media.Image `json:"-"`
 	ImageRefs []string      `json:"image_refs,omitempty"`
+
+	// Profile names the profile that wrote an assistant message. Stored with
+	// history, never sent: sessions.LabelOthers uses it to tell a model which
+	// earlier replies came from other models (PRD D36).
+	Profile string `json:"profile,omitempty"`
 }
 
 // MarshalJSON writes the wire form: content is a string, or a list of text
-// and image_url parts when the message has images. ImageRefs is left out.
+// and image_url parts when the message has images. ImageRefs and Profile are
+// left out.
 func (m Message) MarshalJSON() ([]byte, error) {
 	type wire struct {
 		Role       string     `json:"role"`

@@ -4,7 +4,8 @@
 // history (up/down), multi-line paste (bracketed paste), a dim completion
 // hint for "/" commands and "@" tags (Tab accepts it, or lists the choices),
 // and Ctrl+V, which inserts a clipboard image as "[image #1]" (or pastes the
-// clipboard's text). Image files dragged into the terminal arrive as their
+// clipboard's text); ⌘V does the same where the terminal sends an empty
+// paste for an image-only clipboard. Image files dragged into the terminal arrive as their
 // paths and are attached on Enter.
 package lineedit
 
@@ -326,6 +327,12 @@ func (e *Editor) apply(ctx context.Context, s *state, k key, opt Options) (bool,
 	case kRune:
 		s.insert([]rune{k.r})
 	case kPaste:
+		if k.text == "" {
+			// ⌘V with only an image on the clipboard: terminals that use
+			// bracketed paste send an empty paste. Look for the image.
+			e.pasteClipboard(ctx, s)
+			break
+		}
 		s.insert([]rune(k.text))
 	case kEnter:
 		return true, nil

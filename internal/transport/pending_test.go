@@ -53,3 +53,17 @@ func TestShowFooter(t *testing.T) {
 		t.Error("phone transports should not show the footer")
 	}
 }
+
+func TestTagFirst(t *testing.T) {
+	for in, want := range map[string]string{
+		"[image #1] @opus what is this?":      "@opus [image #1] what is this?",
+		"[image #1] [image #2] @code compare": "@code [image #1] [image #2] compare",
+		"[image #1] what is this?":            "[image #1] what is this?",
+		"@luna [image #1] what":               "@luna [image #1] what",
+		"tell @opus about [image #1]":         "tell @opus about [image #1]",
+	} {
+		if got := tagFirst(in); got != want {
+			t.Errorf("tagFirst(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

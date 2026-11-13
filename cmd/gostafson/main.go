@@ -94,7 +94,11 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 	defer stop()
 
 	sticky := router.NewSticky(rt, func(p string) bool { return cfg.Profiles[p].Sticks() })
-	a := &app{cfg: cfg, router: rt, sticky: sticky, images: images, vision: map[string]bool{}, store: store, clients: clients, guards: guards, audit: auditLog,
+	models := map[string]string{}
+	for name, p := range cfg.Profiles {
+		models[name] = p.Model
+	}
+	a := &app{cfg: cfg, router: rt, sticky: sticky, images: images, vision: map[string]bool{}, models: models, store: store, clients: clients, guards: guards, audit: auditLog,
 		showReasoning: showReasoning, log: logger, workers: map[string]chan transport.Message{}}
 
 	var trs []transport.Transport
@@ -143,7 +147,7 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 		if cfg.Web.Listen != "" {
 			cli.Note("web page: http://" + cfg.Web.Listen)
 		}
-		cli.Note("Tab completes / and @ · ↑ history · Ctrl+V pastes a screenshot · drag in an image file")
+		cli.Note("Tab completes / and @ · ↑ history · Ctrl+V (or ⌘V) pastes a screenshot · drag in an image file")
 	}
 	return a.serve(ctx, trs)
 }
@@ -151,8 +155,9 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 type app struct {
 	cfg           *config.Config
 	router        *router.Router
-	sticky        *router.Sticky // per-chat profile from the last sticky tag (PRD D32, D33)
-	images        *media.Store   // each chat's current images (PRD D34)
+	sticky        *router.Sticky    // per-chat profile from the last sticky tag (PRD D32, D33)
+	images        *media.Store      // each chat's current images (PRD D34)
+	models        map[string]string // profile -> model, for labeling replies (PRD D36)
 	visionMu      sync.Mutex
 	vision        map[string]bool // profile -> takes images, filled on first use
 	store         *sessions.Store
@@ -236,6 +241,7 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 		history = sessions.TextOnly(history) // file contents from tools stay on this machine (PRD D21)
 	}
 	history = a.historyImages(ctx, msg.ChatID, route.Profile, history)
+	history = sessions.LabelOthers(history, route.Profile, a.models)
 
 	turnCtx, cancel := context.WithTimeout(ctx, a.cfg.Loop.TurnTimeout)
 	defer cancel()
@@ -353,7 +359,7 @@ func (a *app) historyImages(ctx context.Context, chat, profile string, history [
 		}
 		note := "[an earlier image; it isn't attached any more]"
 		if remote {
-			note = "[an image was shared here on the local machine; it isn't sent to this model]"
+			note = "[an image was shared here; the model that answered saw it, but it isn't sent to you]"
 		}
 		history[i].Content = strings.TrimSpace(m.Content + "\n" + note)
 	}

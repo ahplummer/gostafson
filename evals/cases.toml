@@ -218,4 +218,11 @@ name = "image-followup"
 images = ["images/red-square.png"]
 turns = ["What color is this? One word.", "And what shape is it? One word."]
 want_profiles = ["default", "default"]
-reply_all = ["square"]
+reply_any = ["square", "rectangle"]     # either shows it still sees the image
+reply_none = ["can't see", "cannot see", "no image", "don't see"]
+
+[[case]]
+name = "image-thin"   # 724x31: qwen's vision encoder needs 32 px a side; Prepare pads it (crashed Ollama's runner before)
+profile = "default"
+images = ["images/thin-line.png"]
+input = "Describe this image in one short sentence."

@@ -70,14 +70,29 @@ func TestPrepare(t *testing.T) {
 		t.Errorf("jpeg width %d", w)
 	}
 
+	thin, err := Prepare(ctx, "line.png", pngOf(t, 724, 31))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w, h := size(t, thin.Data); w != 724 || h != MinSide {
+		t.Errorf("thin png padded to %dx%d", w, h)
+	}
+	wide, err := Prepare(ctx, "banner.png", pngOf(t, 4000, 60)) // scaled to 1568x24, then padded
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w, h := size(t, wide.Data); w != MaxSide || h != MinSide {
+		t.Errorf("wide png = %dx%d", w, h)
+	}
+
 	var g bytes.Buffer
 	gif.Encode(&g, image.NewPaletted(image.Rect(0, 0, 50, 40), []color.Color{color.Black, color.White}), nil)
 	gi, err := Prepare(ctx, "anim.gif", g.Bytes())
 	if err != nil || gi.MediaType != "image/png" {
 		t.Fatalf("gif: %v %s", err, gi.MediaType)
 	}
-	if w, h := size(t, gi.Data); w != 50 || h != 40 {
-		t.Errorf("gif converted to %dx%d", w, h) // converted, not scaled up
+	if w, h := size(t, gi.Data); w != MinSide || h != MinSide { // 50x40: converted, padded, not scaled
+		t.Errorf("gif converted to %dx%d", w, h)
 	}
 }
 
