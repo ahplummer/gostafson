@@ -65,3 +65,38 @@ func TestNewRequiresDefault(t *testing.T) {
 		t.Error("expected error when default profile is missing")
 	}
 }
+
+func TestSticky(t *testing.T) {
+	r, _ := New([]string{"default", "code", "cloud"}, "default")
+	s := NewSticky(r, func(p string) bool { return p != "cloud" })
+	step := func(chat, text, wantProfile string, wantSticky bool) {
+		t.Helper()
+		rt, err := s.Route(chat, text)
+		if err != nil && !errors.Is(err, ErrEmpty) {
+			t.Fatalf("Route(%q) err = %v", text, err)
+		}
+		if rt.Profile != wantProfile || rt.Sticky != wantSticky {
+			t.Errorf("Route(%q) = %s sticky=%v, want %s sticky=%v", text, rt.Profile, rt.Sticky, wantProfile, wantSticky)
+		}
+	}
+	step("a", "hello", "default", false)
+	step("a", "@code read index.html", "code", false)
+	step("a", "yes", "code", true)    // the follow-up stays on code
+	step("b", "hi", "default", false) // per chat
+	step("a", "@cloud news?", "cloud", false)
+	step("a", "and more?", "code", true) // cloud never sticks: back to code, not cloud
+	step("a", "@default hi", "default", false)
+	step("a", "hi again", "default", false)
+	step("a", "@code", "code", false) // a tag alone switches
+	if s.Active("a") != "code" {
+		t.Errorf("active = %s", s.Active("a"))
+	}
+	step("a", "@cloud", "cloud", false) // a remote tag alone doesn't switch
+	step("a", "x", "code", true)
+	s.Reset("a")
+	step("a", "x", "default", false)
+	if _, err := s.Route("a", "@nope x"); err == nil {
+		t.Error("unknown tag: no error")
+	}
+	step("a", "still default", "default", false)
+}

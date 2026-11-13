@@ -19,17 +19,18 @@ func (a *app) command(ctx context.Context, chatID, text string) string {
 		if err := a.store.Reset(ctx, chatID); err != nil {
 			return "error: " + err.Error()
 		}
-		return "history cleared"
+		a.sticky.Reset(chatID)
+		return fmt.Sprintf("history cleared; back on @%s", a.cfg.DefaultProfile)
 	case "/profiles":
 		return a.profiles()
 	case "/status":
 		return a.status(ctx, chatID)
 	default:
-		return a.help()
+		return a.help(chatID)
 	}
 }
 
-func (a *app) help() string {
+func (a *app) help(chatID string) string {
 	tags := a.router.Tags()
 	for i, t := range tags {
 		tags[i] = "@" + t
@@ -37,11 +38,14 @@ func (a *app) help() string {
 	return fmt.Sprintf(`commands:
   /profiles  tags, models and availability
   /status    version, history size, model servers
-  /reset     clear this chat's history
+  /reset     clear this chat's history and go back to @%[3]s
   /help      this list
   /exit      quit (CLI only; also /quit or Ctrl-D)
-tags (one turn only): %s (no tag: @%s)
-add think=true anywhere in a message to turn on reasoning`, strings.Join(tags, " "), a.cfg.DefaultProfile)
+tags: %[1]s (no tag: @%[2]s)
+  a local tag sticks: later untagged messages in this chat go to the same
+  profile until another tag, @%[3]s or /reset; "@code" alone just switches.
+  cloud tags apply to their own message only.
+add think=true anywhere in a message to turn on reasoning`, strings.Join(tags, " "), a.sticky.Active(chatID), a.cfg.DefaultProfile)
 }
 
 // profiles lists each profile: tag, model, server host, and notes.
@@ -91,7 +95,7 @@ func (a *app) profiles() string {
 func (a *app) status(ctx context.Context, chatID string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "gostafson %s\n", version)
-	fmt.Fprintf(&b, "default profile: @%s\n", a.cfg.DefaultProfile)
+	fmt.Fprintf(&b, "default profile: @%s; this chat: @%s\n", a.cfg.DefaultProfile, a.sticky.Active(chatID))
 	if n, err := a.store.Count(ctx, chatID); err != nil {
 		fmt.Fprintf(&b, "history: error: %v\n", err)
 	} else {

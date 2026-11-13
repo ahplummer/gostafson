@@ -86,7 +86,8 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	a := &app{cfg: cfg, router: rt, store: store, clients: clients, guards: guards, audit: auditLog,
+	sticky := router.NewSticky(rt, func(p string) bool { return !cfg.Profiles[p].Remote() })
+	a := &app{cfg: cfg, router: rt, sticky: sticky, store: store, clients: clients, guards: guards, audit: auditLog,
 		showReasoning: showReasoning, log: logger, workers: map[string]chan transport.Message{}}
 
 	var trs []transport.Transport
@@ -137,6 +138,7 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 type app struct {
 	cfg           *config.Config
 	router        *router.Router
+	sticky        *router.Sticky // per-chat profile from the last local tag (PRD D32)
 	store         *sessions.Store
 	clients       map[string]*client.Client
 	guards        map[string]*guard.Guard
@@ -158,7 +160,13 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 		return a.command(ctx, msg.ChatID, text)
 	}
 
-	route, err := a.router.Route(text)
+	route, err := a.sticky.Route(msg.ChatID, text)
+	if errors.Is(err, router.ErrEmpty) && route.Tagged { // just a tag: switch the chat
+		if a.cfg.Profiles[route.Profile].Remote() {
+			return fmt.Sprintf("@%s is a cloud profile: tag each message you want sent there (this chat stays on @%s)", route.Profile, a.sticky.Active(msg.ChatID))
+		}
+		return fmt.Sprintf("this chat now uses @%s until another tag, @%s or /reset", route.Profile, a.cfg.DefaultProfile)
+	}
 	if err != nil {
 		return err.Error()
 	}
@@ -195,8 +203,11 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	elapsed := time.Since(start)
 
 	routedBy := "default"
-	if route.Tagged {
+	switch {
+	case route.Tagged:
 		routedBy = "tag"
+	case route.Sticky:
+		routedBy = "sticky"
 	}
 	rec := audit.Turn{
 		Time: start.UTC(), Kind: "turn", TraceID: traceID, SpanID: spanID,
@@ -226,6 +237,9 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	var b strings.Builder
 	if a.showReasoning && res.Reasoning != "" {
 		fmt.Fprintf(&b, "[reasoning]\n%s\n[/reasoning]\n\n", strings.TrimSpace(res.Reasoning))
+	}
+	if route.Sticky && !transport.ShowFooter(tr) {
+		fmt.Fprintf(&b, "[%s] ", route.Profile) // phones have no footer: say which profile answered
 	}
 	b.WriteString(strings.TrimSpace(res.Reply))
 	if transport.ShowFooter(tr) {

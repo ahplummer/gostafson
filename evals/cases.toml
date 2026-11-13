@@ -179,3 +179,27 @@ want_ask = true
 [[case.files]]
 path = ".git/HEAD"
 contains = ["refs/heads/"]
+
+# multi-turn: sticky local profiles (PRD D32). Each message is routed like a
+# real chat; checks apply after the last turn.
+
+[[case]]
+name = "sticky-followup"
+fixture = "site"
+approve = "yes"
+turns = [
+  "@code Is there a package.json in this project? Don't create anything yet; just tell me.",
+  "Create a minimal package.json for it, with the name relay-viewer.",
+]
+want_profiles = ["code", "code"]
+want_tools = ["write_file"]
+[[case.files]]
+path = "package.json"
+contains = ["relay-viewer"]
+
+[[case]]
+name = "sticky-back-to-default"
+fixture = "site"
+turns = ["@code What is the page title in index.html?", "@default What is 2 plus 2? Just the number.", "And 3 plus 3? Just the number."]
+want_profiles = ["code", "default", "default"]
+reply_all = ["6"]

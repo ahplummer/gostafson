@@ -15,7 +15,7 @@ Companion: the gcp-harness project covers the same governance ideas (scoped iden
 | **Harness** | The whole program around the model: transport, router, agent loop, tools, policy, logging, config. The model is a stateless text-in/text-out function; the harness makes it an agent. |
 | **Transport adapter** | Receives messages from a channel (messenger, CLI) and sends replies back. Hermes calls this layer the gateway; other projects say channel or connector. |
 | **Session** | One conversation's message history, keyed by chat/thread ID. |
-| **Router** | Per-message dispatch before the loop: reads the `@tag` prefix, picks a backend profile, strips the tag. Tags always win; untagged messages go to the decision model (section 6). |
+| **Router** | Per-message dispatch before the loop: reads the `@tag` prefix, picks a backend profile, strips the tag. A local profile's tag sticks for the chat; a cloud profile's tag lasts one message (PRD D32). Tags and sticky profiles always win; untagged messages in chats on `default` go to the decision model (section 6). |
 | **Decision model** | A small non-generative model that answers typed questions (pick one of N options, score, yes/no) with a probability per option in one forward pass. Jev (TypeSafe's "System One" API) is the reference; Laya, kev and mlx-decision are open reproductions. |
 | **Subagent** | A second agent loop started by the first, with a fresh context, its own profile and a narrower tool set. Returns a summary to the parent. |
 | **Delegation depth** | How many levels of subagents may nest. Here: 1. |
@@ -95,7 +95,7 @@ flowchart TD
 3. The agent loop loads chat `X`'s history, adds the message, and calls the model client with the `code` profile's endpoint, model and tool list.
 4. The model returns tool calls (`read_file`, then `write_file`). For each one, the guard checks the path against the jail; `write_file` is allowed inside `~agent/work/napps`, so it runs. The result goes back to the model.
 5. The model answers in plain text. The loop saves the history, writes the audit line, and the adapter sends the reply.
-6. The tag lasts one turn. The next message without a prefix is routed by the decision model (section 6), or goes to `default` until that's built.
+6. A local tag sticks: the next message without a prefix goes to the same profile until another tag, `@default` or `/reset`. A cloud tag lasts one message, and the chat goes back to its local profile. In a chat on `default`, an untagged message will be routed by the decision model (section 6) once that's built.
 
 ---
 

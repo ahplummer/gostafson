@@ -25,6 +25,7 @@ import (
 	"github.com/ahplummer/gostafson/internal/client"
 	"github.com/ahplummer/gostafson/internal/config"
 	"github.com/ahplummer/gostafson/internal/evals"
+	"github.com/ahplummer/gostafson/internal/loop"
 )
 
 func main() {
@@ -58,6 +59,9 @@ func run(cfgPath, casesF, fixtures, models, only string, repeat, ctxSize int, ca
 	}
 	cases = slices.DeleteFunc(cases, func(c evals.Case) bool { return !strings.Contains(c.Name, only) })
 	for _, c := range cases {
+		if len(c.Turns) > 0 {
+			continue // routed per turn; a cloud tag fails that case at run time
+		}
 		p, ok := cfg.Profiles[c.Profile]
 		if !ok {
 			return fmt.Errorf("case %s: no profile %q in %s", c.Name, c.Profile, cfgPath)
@@ -88,12 +92,17 @@ func run(cfgPath, casesF, fixtures, models, only string, repeat, ctxSize int, ca
 	for _, m := range list {
 		m = strings.TrimSpace(m)
 		s := summary{model: m}
-		for _, c := range cases {
-			p := *cfg.Profiles[c.Profile]
+		env := evals.Env{Profiles: map[string]*config.Profile{}, Clients: map[string]loop.Chatter{},
+			Default: cfg.DefaultProfile, Fixtures: fixtures, MaxSteps: cfg.Loop.MaxSteps}
+		for name, orig := range cfg.Profiles {
+			if orig.Remote() {
+				continue
+			}
+			p := *orig
 			if m != "" {
 				p.Model = m
 			}
-			if s.model == "" {
+			if name == cfg.DefaultProfile && s.model == "" {
 				s.model = p.Model
 			}
 			if ctxSize > 0 {
@@ -101,14 +110,18 @@ func run(cfgPath, casesF, fixtures, models, only string, repeat, ctxSize int, ca
 					return err
 				}
 			}
-			if cache && s.cache == "" {
-				s.cache = cacheCheck(p.BaseURL, p.Model, ctxSize)
-				fmt.Printf("%s: prompt cache %s\n", s.model, s.cache)
-			}
-			cl := client.New(p.BaseURL, p.ResolvedAPIKey)
+			env.Profiles[name] = &p
+			env.Clients[name] = client.New(p.BaseURL, p.ResolvedAPIKey)
+		}
+		if cache {
+			p := env.Profiles[cfg.DefaultProfile]
+			s.cache = cacheCheck(p.BaseURL, p.Model, ctxSize)
+			fmt.Printf("%s: prompt cache %s\n", s.model, s.cache)
+		}
+		for _, c := range cases {
 			for range repeat {
 				ctx, cancel := context.WithTimeout(context.Background(), timeout)
-				r := evals.Run(ctx, cl, &p, c, fixtures, cfg.Loop.MaxSteps)
+				r := evals.Run(ctx, env, c)
 				cancel()
 				enc.Encode(r)
 				s.add(r)

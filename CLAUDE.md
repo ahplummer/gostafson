@@ -1,6 +1,6 @@
 # gostafson
 
-A small, local-first agent harness in Go for one Apple Silicon Mac: local models by default, `@tag` model switching per message, optional cloud models via OpenRouter, a messenger for remote access, and tight limits on what the agent can touch.
+A small, local-first agent harness in Go for one Apple Silicon Mac: local models by default, `@tag` model switching (local profiles stick per chat, cloud tags apply to one message), optional cloud models via OpenRouter, a messenger for remote access, and tight limits on what the agent can touch.
 
 ## Read first
 
@@ -14,7 +14,7 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 - M2 (file tools, guard with `os.Root`, JSONL audit log): done.
 - M3 (cloud profile rules, OpenRouter data-collection preference, approval gate on the CLI): done; `@claude` and `@cloud` checked live.
 - M4 (transports, `setup.sh`, LaunchDaemon, first deploy): done. Deployed on the host as LaunchDaemons running as `agent`; CLI colors, web page, Telegram and White Noise tested live. `make rollback` and a reboot tested.
-- M5 (command tool and evals): in progress. Eval harness done (`make eval`); `qwen3.5:9b` stays the model for now. `run` tool built (PRD D31); not yet deployed.
+- M5 (command tool and evals): in progress. Eval harness done (`make eval`); `qwen3.5:9b` stays the model for now. `run` tool built (PRD D31), deployed and tested from the phone (tree, git init/add/commit with approvals, npm refused).
 
 ## Rules
 
@@ -35,7 +35,7 @@ cmd/gostafson-eval/  golden-case runner: pass rate, speed, prompt-cache reuse pe
 cmd/gostafson/       main.go: wiring, flags, turn handling; serve.go: transports and per-chat workers; commands.go: /help /profiles /status /reset
 internal/config/     TOML config; API keys from env vars (dev) or a 0600 secrets file (host)
 internal/client/     OpenAI-compatible chat completions client (net/http)
-internal/router/     @tag and think=true parsing
+internal/router/     @tag and think=true parsing; Sticky: per-chat profile from the last local tag (PRD D32)
 internal/loop/       agent loop: model call, tools, step limit
 internal/tools/      file tools (list_dir, read_file, write_file, search_files) on an *os.Root; run.go: command list, argument checks, sandbox
 internal/guard/      default deny, path checks, one os.Root per profile, audit record per call

@@ -19,6 +19,7 @@ import (
 	"github.com/ahplummer/gostafson/internal/config"
 	"github.com/ahplummer/gostafson/internal/guard"
 	"github.com/ahplummer/gostafson/internal/loop"
+	"github.com/ahplummer/gostafson/internal/router"
 )
 
 // Case is one golden test. Text checks ignore case.
@@ -27,6 +28,12 @@ type Case struct {
 	Profile string `toml:"profile"`
 	Input   string `toml:"input"`
 	Fixture string `toml:"fixture"` // directory under the fixtures dir copied into a fresh root; empty: an empty root
+	// Turns makes a multi-turn case: each message goes through the same
+	// per-chat routing as the real chat (tags, sticky profiles), with the
+	// history carried over. Profile and Input are then unused; the checks
+	// apply after the last turn, to its reply.
+	Turns        []string `toml:"turns"`
+	WantProfiles []string `toml:"want_profiles"` // the profile each turn must go to
 	// Approve answers every approval question: "yes" approves, anything else denies.
 	Approve string `toml:"approve"`
 	// WantAsk, when set, requires (true) or forbids (false) an approval question.
@@ -57,8 +64,11 @@ func Load(path string) ([]Case, error) {
 		return nil, err
 	}
 	for i, c := range f.Case {
-		if c.Name == "" || c.Profile == "" || c.Input == "" {
-			return nil, fmt.Errorf("case %d: name, profile and input are required", i+1)
+		if c.Name == "" || (len(c.Turns) == 0 && (c.Profile == "" || c.Input == "")) {
+			return nil, fmt.Errorf("case %d: name and either profile and input, or turns, are required", i+1)
+		}
+		if len(c.WantProfiles) > 0 && len(c.WantProfiles) != len(c.Turns) {
+			return nil, fmt.Errorf("case %s: want_profiles needs one entry per turn", c.Name)
 		}
 	}
 	return f.Case, nil
@@ -68,6 +78,7 @@ func Load(path string) ([]Case, error) {
 type Result struct {
 	Case       string   `json:"case"`
 	Profile    string   `json:"profile"`
+	Profiles   []string `json:"profiles,omitempty"` // per turn, for multi-turn cases
 	Model      string   `json:"model"`
 	Pass       bool     `json:"pass"`
 	Failures   []string `json:"failures,omitempty"`
@@ -85,10 +96,19 @@ type Result struct {
 	Reply      string   `json:"reply"`
 }
 
-// Run runs one case with profile p (its Model already set to the model under
-// test). fixtures is the directory holding the fixture directories.
-func Run(ctx context.Context, c loop.Chatter, p *config.Profile, cs Case, fixtures string, maxSteps int) Result {
-	r := Result{Case: cs.Name, Profile: p.Name, Model: p.Model}
+// Env is what cases run against: the profiles (each with the model under
+// test already set), a model client per local profile, and the limits.
+type Env struct {
+	Profiles map[string]*config.Profile
+	Default  string
+	Clients  map[string]loop.Chatter
+	Fixtures string
+	MaxSteps int
+}
+
+// Run runs one case in a fresh copy of its fixture.
+func Run(ctx context.Context, env Env, cs Case) Result {
+	r := Result{Case: cs.Name, Profile: cs.Profile}
 	root, err := os.MkdirTemp("", "gostafson-eval-")
 	if err != nil {
 		r.Err = err.Error()
@@ -97,7 +117,7 @@ func Run(ctx context.Context, c loop.Chatter, p *config.Profile, cs Case, fixtur
 	defer os.RemoveAll(root)
 	before := map[string][]byte{}
 	if cs.Fixture != "" {
-		src := filepath.Join(fixtures, cs.Fixture)
+		src := filepath.Join(env.Fixtures, cs.Fixture)
 		if err := os.CopyFS(root, os.DirFS(src)); err != nil {
 			r.Err = fmt.Sprintf("fixture: %v", err)
 			return r
@@ -109,29 +129,75 @@ func Run(ctx context.Context, c loop.Chatter, p *config.Profile, cs Case, fixtur
 		}
 	}
 
-	dir := ""
-	if len(p.Tools) > 0 {
-		dir = root
+	turns := cs.Turns
+	route := func(text string) (string, string, error) { return cs.Profile, text, nil }
+	if len(turns) == 0 {
+		turns = []string{cs.Input}
+	} else {
+		names := make([]string, 0, len(env.Profiles))
+		for n := range env.Profiles {
+			names = append(names, n)
+		}
+		rt, err := router.New(names, env.Default)
+		if err != nil {
+			r.Err = err.Error()
+			return r
+		}
+		sticky := router.NewSticky(rt, func(p string) bool { return !env.Profiles[p].Remote() })
+		route = func(text string) (string, string, error) {
+			rr, err := sticky.Route("eval", text)
+			return rr.Profile, rr.Text, err
+		}
 	}
-	g, err := guard.New(p.Name, p.Tools, dir, nil)
-	if err != nil {
-		r.Err = err.Error()
-		return r
-	}
-	defer g.Close()
-	ap := &answerer{yes: strings.EqualFold(cs.Approve, "yes")}
-	tools := &recorder{inner: g.ForTurn("eval", "", "", ap), ap: ap, r: &r}
-	timed := &timer{inner: c, r: &r}
 
+	ap := &answerer{yes: strings.EqualFold(cs.Approve, "yes")}
+	guards := map[string]*guard.Guard{}
+	defer func() {
+		for _, g := range guards {
+			g.Close()
+		}
+	}()
+	var history []client.Message
 	start := time.Now()
-	res, err := loop.Run(ctx, timed, tools, loop.Turn{Profile: p, Input: cs.Input, MaxSteps: maxSteps})
-	r.TurnMS = time.Since(start).Milliseconds()
-	r.Steps, r.Reply = res.Steps, res.Reply
-	r.Prompt, r.Completion = res.Usage.PromptTokens, res.Usage.CompletionTokens
-	r.Asked = ap.asked
-	if err != nil {
-		r.Err = err.Error()
+	for _, text := range turns {
+		name, input, err := route(text)
+		if err != nil {
+			r.Err = err.Error()
+			break
+		}
+		p, c := env.Profiles[name], env.Clients[name]
+		if p == nil || c == nil {
+			r.Err = fmt.Sprintf("profile %q is not available to evals (local profiles only)", name)
+			break
+		}
+		r.Profiles = append(r.Profiles, name)
+		r.Profile, r.Model = name, p.Model
+		g, ok := guards[name]
+		if !ok {
+			dir := ""
+			if len(p.Tools) > 0 {
+				dir = root
+			}
+			if g, err = guard.New(name, p.Tools, dir, nil); err != nil {
+				r.Err = err.Error()
+				break
+			}
+			guards[name] = g
+		}
+		tools := &recorder{inner: g.ForTurn("eval", "", "", ap), ap: ap, r: &r}
+		res, err := loop.Run(ctx, &timer{inner: c, r: &r}, tools, loop.Turn{Profile: p, History: history, Input: input, MaxSteps: env.MaxSteps})
+		r.Steps += res.Steps
+		r.Reply = res.Reply
+		r.Prompt += res.Usage.PromptTokens
+		r.Completion += res.Usage.CompletionTokens
+		history = append(history, res.New...)
+		if err != nil {
+			r.Err = err.Error()
+			break
+		}
 	}
+	r.TurnMS = time.Since(start).Milliseconds()
+	r.Asked = ap.asked
 	r.Failures = check(cs, r, root, before)
 	r.Pass = r.Err == "" && len(r.Failures) == 0
 	return r
@@ -140,6 +206,9 @@ func Run(ctx context.Context, c loop.Chatter, p *config.Profile, cs Case, fixtur
 func check(cs Case, r Result, root string, before map[string][]byte) []string {
 	var fails []string
 	failf := func(format string, a ...any) { fails = append(fails, fmt.Sprintf(format, a...)) }
+	if len(cs.WantProfiles) > 0 && !slices.Equal(cs.WantProfiles, r.Profiles) {
+		failf("turns went to %v, want %v", r.Profiles, cs.WantProfiles)
+	}
 	called := map[string]bool{}
 	for _, c := range r.Calls {
 		called[strings.TrimSuffix(strings.Fields(c)[0], ":")] = true // "run: ls -la" counts as run
