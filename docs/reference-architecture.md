@@ -15,7 +15,7 @@ Companion: the gcp-harness project covers the same governance ideas (scoped iden
 | **Harness** | The whole program around the model: transport, router, agent loop, tools, policy, logging, config. The model is a stateless text-in/text-out function; the harness makes it an agent. |
 | **Transport adapter** | Receives messages from a channel (messenger, CLI) and sends replies back. Hermes calls this layer the gateway; other projects say channel or connector. |
 | **Session** | One conversation's message history, keyed by chat/thread ID. |
-| **Router** | Per-message dispatch before the loop: reads the `@tag` prefix, picks a backend profile, strips the tag. A local profile's tag sticks for the chat; a cloud profile's tag lasts one message (PRD D32). Tags and sticky profiles always win; untagged messages in chats on `default` go to the decision model (section 6). |
+| **Router** | Per-message dispatch before the loop: reads the `@tag` prefix, picks a backend profile, strips the tag. A local profile's tag sticks for the chat; a cloud profile's tag lasts one message (PRD D32) unless the profile has `sticky = true` (D33), and then every reply starts with `[profile]`. Tags and sticky profiles always win; untagged messages in chats on `default` go to the decision model (section 6). |
 | **Decision model** | A small non-generative model that answers typed questions (pick one of N options, score, yes/no) with a probability per option in one forward pass. Jev (TypeSafe's "System One" API) is the reference; Laya, kev and mlx-decision are open reproductions. |
 | **Subagent** | A second agent loop started by the first, with a fresh context, its own profile and a narrower tool set. Returns a summary to the parent. |
 | **Delegation depth** | How many levels of subagents may nest. Here: 1. |
@@ -66,7 +66,7 @@ flowchart TD
         work[("~agent/work/*<br/>only writable dirs")]
     end
 
-    openrouter["OpenRouter API<br/>@cloud, @claude, ...<br/>opt-in, spend cap"]
+    openrouter["OpenRouter API<br/>@cloud, @sonnet, ...<br/>opt-in, spend cap"]
 
     phone <--> transport
     transport --> router --> loop
@@ -95,7 +95,7 @@ flowchart TD
 3. The agent loop loads chat `X`'s history, adds the message, and calls the model client with the `code` profile's endpoint, model and tool list.
 4. The model returns tool calls (`read_file`, then `write_file`). For each one, the guard checks the path against the jail; `write_file` is allowed inside `~agent/work/napps`, so it runs. The result goes back to the model.
 5. The model answers in plain text. The loop saves the history, writes the audit line, and the adapter sends the reply.
-6. A local tag sticks: the next message without a prefix goes to the same profile until another tag, `@default` or `/reset`. A cloud tag lasts one message, and the chat goes back to its local profile. In a chat on `default`, an untagged message will be routed by the decision model (section 6) once that's built.
+6. A local tag sticks: the next message without a prefix goes to the same profile until another tag, `@default` or `/reset`. A cloud tag lasts one message, and the chat goes back to its local profile, unless that cloud profile has `sticky = true` (PRD D33). In a chat on `default`, an untagged message will be routed by the decision model (section 6) once that's built.
 
 ---
 
@@ -107,7 +107,7 @@ flowchart TD
 | Concurrency | One goroutine per chat; `context.Context` carries the turn timeout to the model call, tools and subagents | An approval wait in one chat doesn't block others; cancel stops everything under the turn | Local model calls still go through one at a time (memory, section 4) |
 | Model client | Hand-written chat completions client on `net/http` (`internal/client`), one per profile base URL | Ollama (`/v1`), LM Studio (`/v1`), OpenRouter (`https://openrouter.ai/api/v1`) all accept it; `openai-go` v3 would pull in the Azure and AWS SDKs (PRD D12) | No LangChain or agent framework: the loop is about 100 lines |
 | Agent loop | Hand-written: max 8 tool steps, 120 s wall clock per turn | Easy to read and test; nothing hidden | Stop and report on limit, don't silently truncate |
-| Router | Prefix table in config: `@code→code`, `@cloud→cloud`, `@claude→claude`; no tag → decision model | Tags are predictable and user-controlled; the decision model handles the untagged case | Profiles with `think_toggle` send `reasoning_effort: "none"` unless the message has `think=true` |
+| Router | Prefix table in config: `@code→code`, `@cloud→cloud`, `@sonnet→sonnet` (one tag per cloud model); no tag → decision model | Tags are predictable and user-controlled; the decision model handles the untagged case | Profiles with `think_toggle` send `reasoning_effort: "none"` unless the message has `think=true` |
 | Decision model | Behind a `decide(state, options) → {option: prob}` interface; mlx-decision serving `pplx-decider-flash-v1.2` (4-bit) on the host, Jev's `/v1/systemone` API | ~200 ms on a short message, 2.8 GB, gives a probability per option; tested on the host (section 6) | Section 6 |
 | Subagents | `delegate(profile, task)` tool that calls the loop again | Keeps the parent's context small | Section 7 |
 | Session store | SQLite via `modernc.org/sqlite` (no cgo, keeps the binary static), one row per message, keyed by chat ID | Survives restarts; easy to inspect | Keep last N turns in context; `/reset` command clears |
@@ -131,7 +131,11 @@ flowchart TD
 | default | none | Ollama | `qwen3.5:9b`, thinking off unless `think=true` | ~6.6 GB |
 | code | `@code` | Ollama | `qwen3.5:9b` for now; M5 evals compare `qwen3-coder:30b` (MoE, 3B active) and `qwen2.5-coder:14b` | ~6.6 GB now; ~18 GB / ~9 GB |
 | cloud | `@cloud` | OpenRouter | a general model slug of your choice | 0 |
-| claude | `@claude` | OpenRouter | an Anthropic model slug | 0 |
+| sonnet | `@sonnet` | OpenRouter | `anthropic/claude-sonnet-5.5` | 0 |
+| opus | `@opus` | OpenRouter | `anthropic/claude-opus-5.5` | 0 |
+| fable | `@fable` | OpenRouter | `anthropic/claude-fable-5.2` | 0 |
+| kimi | `@kimi` | OpenRouter | `moonshotai/kimi-k3` | 0 |
+| luna | `@luna` | OpenRouter | `openai/gpt-5.6-luna` | 0 |
 
 - **GPU memory on 24 GB:** macOS lets the GPU wire about 16–18 GB by default. `qwen3.5:9b` plus `qwen2.5-coder:14b` fit together. `qwen3-coder:30b` doesn't fit next to the 9B; Ollama unloads one to load the other (set `keep_alive`), so the first `@code` turn after a default turn takes a few seconds longer.
 - **Tool calling:** the loop depends on the model emitting proper tool calls. Qwen3.5, Qwen3 and Qwen3-Coder do this in Ollama; `qwen2.5-coder` has been unreliable at it. Test each model with the same small golden set before settling.
@@ -412,7 +416,7 @@ To rotate: change the key in Bitwarden, `bwset` again, `make push-secrets`, rest
 
 **Decide**
 - Transport: White Noise/Marmot, Signal, Telegram, or Tailscale web UI.
-- Which OpenRouter models back `@cloud` and `@claude`, and the credit limit.
+- The credit limit on the OpenRouter key (models: one profile per model, PRD FR-2).
 
 **Verify during the build**
 - State of headless Marmot/White Noise tooling a bot can use.

@@ -143,7 +143,7 @@ func Run(ctx context.Context, env Env, cs Case) Result {
 			r.Err = err.Error()
 			return r
 		}
-		sticky := router.NewSticky(rt, func(p string) bool { return !env.Profiles[p].Remote() })
+		sticky := router.NewSticky(rt, func(p string) bool { return env.Profiles[p].Sticks() })
 		route = func(text string) (string, string, error) {
 			rr, err := sticky.Route("eval", text)
 			return rr.Profile, rr.Text, err

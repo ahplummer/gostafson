@@ -97,7 +97,28 @@ Don't repeat a file's contents in your reply unless asked; say what you found or
 # api_key_env = "OPENROUTER_API_KEY"
 # plugins = [{ id = "web", engine = "exa", max_results = 5 }]   # web search (Exa: $0.007 per request; omit engine for the provider's own search, priced by the provider)
 #
-# [profiles.claude]
+# [profiles.sonnet]
 # base_url = "https://openrouter.ai/api/v1"
-# model = "anthropic/model-name"
+# model = "anthropic/claude-sonnet-5.5"
+# api_key_env = "OPENROUTER_API_KEY"
+#
+# [profiles.opus]
+# base_url = "https://openrouter.ai/api/v1"
+# model = "anthropic/claude-opus-5.5"
+# api_key_env = "OPENROUTER_API_KEY"
+# sticky = true   # optional: untagged messages follow @opus once tagged; replies start with [opus] (PRD D33)
+#
+# [profiles.fable]
+# base_url = "https://openrouter.ai/api/v1"
+# model = "anthropic/claude-fable-5.2"
+# api_key_env = "OPENROUTER_API_KEY"
+#
+# [profiles.kimi]
+# base_url = "https://openrouter.ai/api/v1"
+# model = "moonshotai/kimi-k3"
+# api_key_env = "OPENROUTER_API_KEY"
+#
+# [profiles.luna]
+# base_url = "https://openrouter.ai/api/v1"
+# model = "openai/gpt-5.6-luna"
 # api_key_env = "OPENROUTER_API_KEY"

@@ -68,7 +68,28 @@ model = "<provider/model>"
 api_key = "openrouter"     # OPENROUTER_API_KEY in make push-secrets
 plugins = [{ id = "web", engine = "exa", max_results = 5 }]   # web search, $0.007 per request
 
-[profiles.claude]
+[profiles.sonnet]
 base_url = "https://openrouter.ai/api/v1"
-model = "<anthropic/model>"
+model = "anthropic/claude-sonnet-5.5"
+api_key = "openrouter"
+
+[profiles.opus]
+base_url = "https://openrouter.ai/api/v1"
+model = "anthropic/claude-opus-5.5"
+api_key = "openrouter"
+sticky = true   # optional: untagged messages follow @opus once tagged; replies start with [opus] (PRD D33)
+
+[profiles.fable]
+base_url = "https://openrouter.ai/api/v1"
+model = "anthropic/claude-fable-5.2"
+api_key = "openrouter"
+
+[profiles.kimi]
+base_url = "https://openrouter.ai/api/v1"
+model = "moonshotai/kimi-k3"
+api_key = "openrouter"
+
+[profiles.luna]
+base_url = "https://openrouter.ai/api/v1"
+model = "openai/gpt-5.6-luna"
 api_key = "openrouter"

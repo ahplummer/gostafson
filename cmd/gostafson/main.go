@@ -86,7 +86,7 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	sticky := router.NewSticky(rt, func(p string) bool { return !cfg.Profiles[p].Remote() })
+	sticky := router.NewSticky(rt, func(p string) bool { return cfg.Profiles[p].Sticks() })
 	a := &app{cfg: cfg, router: rt, sticky: sticky, store: store, clients: clients, guards: guards, audit: auditLog,
 		showReasoning: showReasoning, log: logger, workers: map[string]chan transport.Message{}}
 
@@ -138,7 +138,7 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 type app struct {
 	cfg           *config.Config
 	router        *router.Router
-	sticky        *router.Sticky // per-chat profile from the last local tag (PRD D32)
+	sticky        *router.Sticky // per-chat profile from the last sticky tag (PRD D32, D33)
 	store         *sessions.Store
 	clients       map[string]*client.Client
 	guards        map[string]*guard.Guard
@@ -162,8 +162,16 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 
 	route, err := a.sticky.Route(msg.ChatID, text)
 	if errors.Is(err, router.ErrEmpty) && route.Tagged { // just a tag: switch the chat
-		if a.cfg.Profiles[route.Profile].Remote() {
+		p := a.cfg.Profiles[route.Profile]
+		switch {
+		case !p.Sticks():
 			return fmt.Sprintf("@%s is a cloud profile: tag each message you want sent there (this chat stays on @%s)", route.Profile, a.sticky.Active(msg.ChatID))
+		case p.Remote():
+			return fmt.Sprintf("this chat now sends untagged messages to @%s (%s, off this machine) until another tag, @%s or /reset; replies start with [%s]",
+				route.Profile, host(p.BaseURL), a.cfg.DefaultProfile, route.Profile)
+		}
+		if route.Profile == a.cfg.DefaultProfile {
+			return fmt.Sprintf("this chat is back on @%s", route.Profile)
 		}
 		return fmt.Sprintf("this chat now uses @%s until another tag, @%s or /reset", route.Profile, a.cfg.DefaultProfile)
 	}
@@ -238,8 +246,12 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	if a.showReasoning && res.Reasoning != "" {
 		fmt.Fprintf(&b, "[reasoning]\n%s\n[/reasoning]\n\n", strings.TrimSpace(res.Reasoning))
 	}
-	if route.Sticky && !transport.ShowFooter(tr) {
-		fmt.Fprintf(&b, "[%s] ", route.Profile) // phones have no footer: say which profile answered
+	// Say which profile answered when the footer won't (phones), and always
+	// while a sticky cloud profile is in use, so it's clear messages leave
+	// this machine.
+	stickyCloud := profile.Remote() && profile.Sticky && (route.Sticky || route.Tagged)
+	if stickyCloud || (route.Sticky && !transport.ShowFooter(tr)) {
+		fmt.Fprintf(&b, "[%s] ", route.Profile)
 	}
 	b.WriteString(strings.TrimSpace(res.Reply))
 	if transport.ShowFooter(tr) {

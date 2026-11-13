@@ -2,8 +2,9 @@
 //
 // A leading @tag selects the profile with that name and is removed from the
 // text. Router.Route handles one message; Sticky adds per-chat memory: a tag
-// for a local profile sticks until another tag, @default or a reset, while a
-// tag for a remote profile applies to its message only (PRD D32). Without a
+// for a sticky profile (every local one, and remote ones marked sticky) holds
+// until another sticky tag, @default or a reset; any other tag applies to its
+// message only (PRD D32, D33). Without a
 // tag or a sticky profile, the default profile is used (a decision model takes
 // over the untagged case in a later milestone). The token think=true anywhere
 // in the message turns reasoning on for the turn.
@@ -114,21 +115,21 @@ func (r *Router) Route(text string) (Route, error) {
 // Default returns the default profile's name.
 func (r *Router) Default() string { return r.def }
 
-// Sticky routes messages per chat, remembering the last local profile tagged.
+// Sticky routes messages per chat, remembering the last sticky profile tagged.
 type Sticky struct {
 	r      *Router
-	local  func(profile string) bool
+	sticks func(profile string) bool
 	mu     sync.Mutex
 	active map[string]string // chat -> sticky profile; absent means the default
 }
 
-// NewSticky returns a per-chat router. local reports whether a profile runs on
-// this machine; only local profiles stick.
-func NewSticky(r *Router, local func(profile string) bool) *Sticky {
-	return &Sticky{r: r, local: local, active: map[string]string{}}
+// NewSticky returns a per-chat router. sticks reports whether a profile's
+// tag holds for the chat.
+func NewSticky(r *Router, sticks func(profile string) bool) *Sticky {
+	return &Sticky{r: r, sticks: sticks, active: map[string]string{}}
 }
 
-// Route routes one message in chat. A tagged local profile becomes the chat's
+// Route routes one message in chat. A tagged sticky profile becomes the chat's
 // profile (also for a message that is only a tag, which returns ErrEmpty with
 // the route). An untagged message goes to the chat's profile.
 func (s *Sticky) Route(chat, text string) (Route, error) {
@@ -139,7 +140,7 @@ func (s *Sticky) Route(chat, text string) (Route, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
-	case route.Tagged && s.local(route.Profile):
+	case route.Tagged && s.sticks(route.Profile):
 		if route.Profile == s.r.def {
 			delete(s.active, chat)
 		} else {

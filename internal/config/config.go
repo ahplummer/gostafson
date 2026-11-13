@@ -117,6 +117,11 @@ type Profile struct {
 	// Plugins is sent as OpenRouter's "plugins" array, e.g.
 	// [{ id = "web", engine = "exa", max_results = 5 }] for web search.
 	Plugins []map[string]any `toml:"plugins"`
+	// Sticky lets a remote profile's tag stick for the chat, like a local
+	// profile's (PRD D33): untagged messages then go to the cloud until another
+	// tag, @default or /reset, and every reply says which profile answered.
+	// Local profiles always stick; this only matters for remote ones.
+	Sticky bool `toml:"sticky"`
 
 	ResolvedAPIKey string `toml:"-"`
 	// MissingKey is set when the profile needs a key that isn't available, e.g.
@@ -222,6 +227,9 @@ func (c *Config) applyDefaults() {
 // Remote reports whether the profile's server is off this machine. Remote
 // profiles get text-only history and no file tools by default.
 func (p *Profile) Remote() bool { return !IsLocal(p.BaseURL) }
+
+// Sticks reports whether the profile's tag sticks for the chat.
+func (p *Profile) Sticks() bool { return !p.Remote() || p.Sticky }
 
 func (c *Config) validate() error {
 	var errs []error

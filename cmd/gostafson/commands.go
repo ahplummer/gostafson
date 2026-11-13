@@ -44,7 +44,8 @@ func (a *app) help(chatID string) string {
 tags: %[1]s (no tag: @%[2]s)
   a local tag sticks: later untagged messages in this chat go to the same
   profile until another tag, @%[3]s or /reset; "@code" alone just switches.
-  cloud tags apply to their own message only.
+  cloud tags apply to their own message only, unless the profile has
+  sticky = true in config (see /profiles).
 add think=true anywhere in a message to turn on reasoning`, strings.Join(tags, " "), a.sticky.Active(chatID), a.cfg.DefaultProfile)
 }
 
@@ -75,6 +76,11 @@ func (a *app) profiles() string {
 				if pl["id"] == "web" {
 					notes = append(notes, "web search")
 				}
+			}
+			if p.Sticky {
+				notes = append(notes, "sticky")
+			} else {
+				notes = append(notes, "one message per tag")
 			}
 		}
 		if p.MissingKey != "" {

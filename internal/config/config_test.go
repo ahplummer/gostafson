@@ -359,7 +359,7 @@ func TestHostExampleLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.CLI.On() || c.Web.ResolvedToken != "w" || c.Telegram.ResolvedToken != "t" || c.Profiles["claude"].ResolvedAPIKey != "k" {
+	if c.CLI.On() || c.Web.ResolvedToken != "w" || c.Telegram.ResolvedToken != "t" || c.Profiles["sonnet"].ResolvedAPIKey != "k" || !c.Profiles["opus"].Sticks() || c.Profiles["sonnet"].Sticks() || !c.Profiles["code"].Sticks() {
 		t.Errorf("host config = cli %v, web %q, telegram %q", c.CLI.On(), c.Web.ResolvedToken, c.Telegram.ResolvedToken)
 	}
 	if c.Profiles["code"].Root != "/Users/agent/work/napps" {

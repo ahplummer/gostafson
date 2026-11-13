@@ -100,3 +100,30 @@ func TestSticky(t *testing.T) {
 	}
 	step("a", "still default", "default", false)
 }
+
+// A remote profile marked sticky holds like a local one; an unmarked remote
+// profile still applies to its message only, and doesn't end the sticky one.
+func TestStickyRemote(t *testing.T) {
+	r, _ := New([]string{"default", "code", "cloud", "opus"}, "default")
+	s := NewSticky(r, func(p string) bool { return p != "cloud" }) // opus: remote but sticky
+	for _, st := range []struct{ text, want string }{
+		{"@opus review this", "opus"},
+		{"and this?", "opus"},
+		{"@cloud news?", "cloud"},
+		{"more", "opus"},
+		{"@code fix it", "code"},
+		{"next", "code"},
+		{"@opus", "opus"},
+		{"x", "opus"},
+		{"@default", "default"},
+		{"y", "default"},
+	} {
+		rt, err := s.Route("a", st.text)
+		if err != nil && !errors.Is(err, ErrEmpty) {
+			t.Fatal(err)
+		}
+		if rt.Profile != st.want {
+			t.Errorf("%q -> %s, want %s", st.text, rt.Profile, st.want)
+		}
+	}
+}

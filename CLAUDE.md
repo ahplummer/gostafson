@@ -12,7 +12,7 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 
 - M1 (chat over CLI with tag routing): done.
 - M2 (file tools, guard with `os.Root`, JSONL audit log): done.
-- M3 (cloud profile rules, OpenRouter data-collection preference, approval gate on the CLI): done; `@claude` and `@cloud` checked live.
+- M3 (cloud profile rules, OpenRouter data-collection preference, approval gate on the CLI): done; `@claude` (now `@sonnet`) and `@cloud` checked live. Cloud profiles: cloud, sonnet, opus, fable, kimi, luna.
 - M4 (transports, `setup.sh`, LaunchDaemon, first deploy): done. Deployed on the host as LaunchDaemons running as `agent`; CLI colors, web page, Telegram and White Noise tested live. `make rollback` and a reboot tested.
 - M5 (command tool and evals): in progress. Eval harness done (`make eval`); `qwen3.5:9b` stays the model for now. `run` tool built (PRD D31), deployed and tested from the phone (tree, git init/add/commit with approvals, npm refused).
 
@@ -24,7 +24,7 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 - **Security invariants** (tests must cover them; a failing guard test blocks deploy):
   - All file access from tools goes through `os.Root`.
   - No shell: commands run as argv from the fixed list in `internal/tools/run.go`, never `sh -c`, each under `sandbox-exec`; unlisted commands are refused, not offered for approval (PRD D31).
-  - Cloud profiles get no file tools by default and text-only history; nothing routes to a cloud profile without an explicit tag or approval; `default_profile` must be local.
+  - Cloud profiles get no file tools by default and text-only history; nothing routes to a cloud profile without an explicit tag (which holds for the chat only if that profile has `sticky = true`, PRD D33) or approval; `default_profile` must be local.
   - Subagents and the decision model can only narrow permissions.
 - Keep each `internal/` package small enough to read in one sitting.
 
