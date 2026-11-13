@@ -124,6 +124,16 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 			words = append(words, "@"+t)
 		}
 		cli.Complete = func(string) []string { return words }
+		cli.Status = func() string { // shown before the prompt: "sonnet · travato ❯"
+			var parts []string
+			if p := a.sticky.Active(cli.ChatID); p != cfg.DefaultProfile {
+				parts = append(parts, p)
+			}
+			if p := a.project(cli.ChatID); p != nil {
+				parts = append(parts, p.Name)
+			}
+			return strings.Join(parts, " · ")
+		}
 		trs = append(trs, cli)
 	}
 	if cfg.Web.Listen != "" {
@@ -356,16 +366,21 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	if a.showReasoning && res.Reasoning != "" {
 		fmt.Fprintf(&b, "[reasoning]\n%s\n[/reasoning]\n\n", strings.TrimSpace(res.Reasoning))
 	}
-	// Say which profile answered when the footer won't (phones), and always
-	// while a sticky cloud profile is in use, so it's clear messages leave
-	// this machine.
+	// Say which profile answered, and the attached project, when the footer
+	// won't (phones); and always while a sticky cloud profile is in use, so
+	// it's clear messages leave this machine.
+	who := route.Profile
+	attached := a.project(msg.ChatID)
+	if attached != nil {
+		who += " · " + attached.Name
+	}
 	stickyCloud := profile.Remote() && profile.Sticky && (route.Sticky || route.Tagged)
-	if stickyCloud || (route.Sticky && !transport.ShowFooter(tr)) {
-		fmt.Fprintf(&b, "[%s] ", route.Profile)
+	if stickyCloud || (!transport.ShowFooter(tr) && (route.Sticky || attached != nil)) {
+		fmt.Fprintf(&b, "[%s] ", who)
 	}
 	b.WriteString(strings.TrimSpace(res.Reply))
 	if transport.ShowFooter(tr) {
-		fmt.Fprintf(&b, "\n[%s | %s | %.1fs | %d tok]", route.Profile, profile.Model, elapsed.Seconds(), res.Usage.TotalTokens)
+		fmt.Fprintf(&b, "\n[%s | %s | %.1fs | %d tok]", who, profile.Model, elapsed.Seconds(), res.Usage.TotalTokens)
 	}
 	return b.String()
 }

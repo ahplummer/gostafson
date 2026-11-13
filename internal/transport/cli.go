@@ -26,9 +26,12 @@ type CLI struct {
 	// Complete returns "/" command and "@" tag candidates for the line
 	// editor's hints; main sets it.
 	Complete func(word string) []string
-	out      io.Writer
-	lines    chan lineOrErr
-	ed       *lineedit.Editor // set when stdin and stdout are a terminal
+	// Status, if set, is shown before the prompt: the chat's sticky profile
+	// and attached project ("sonnet · travato ❯").
+	Status func() string
+	out    io.Writer
+	lines  chan lineOrErr
+	ed     *lineedit.Editor // set when stdin and stdout are a terminal
 
 	mu   sync.Mutex // guards out and the spinner
 	spin *spinner
@@ -151,7 +154,13 @@ func (c *CLI) Receive(ctx context.Context) (Message, error) {
 
 func (c *CLI) receiveEdited(ctx context.Context) (Message, error) {
 	for {
-		l, err := c.ed.ReadLine(ctx, c.Prompt, lineedit.Options{History: true, Complete: true})
+		prompt := c.Prompt
+		if c.Status != nil {
+			if s := c.Status(); s != "" {
+				prompt = accent2 + s + reset + " " + c.Prompt
+			}
+		}
+		l, err := c.ed.ReadLine(ctx, prompt, lineedit.Options{History: true, Complete: true})
 		if errors.Is(err, lineedit.ErrInterrupt) {
 			return Message{}, io.EOF
 		}
