@@ -197,25 +197,27 @@ func (t *Telegram) handleUpdate(ctx context.Context, u tgUpdate) {
 	}
 	chat := tgPrefix + strconv.FormatInt(m.Chat.ID, 10)
 	msg := Message{ChatID: chat, Sender: strconv.FormatInt(m.From.ID, 10), Text: m.Text}
-	fileID, name := "", ""
+	fileID, name, isImage := "", "", false
 	switch {
 	case len(m.Photo) > 0:
-		fileID, name = m.Photo[len(m.Photo)-1].FileID, "photo.jpg" // the largest size
-	case m.Document != nil && strings.HasPrefix(m.Document.MimeType, "image/"):
-		fileID, name = m.Document.FileID, m.Document.FileName
+		fileID, name, isImage = m.Photo[len(m.Photo)-1].FileID, "photo.jpg", true // the largest size
 	case m.Document != nil:
-		t.call(ctx, "sendMessage", map[string]any{"chat_id": m.Chat.ID, "text": "I can only read images, not " + cmp.Or(m.Document.MimeType, "this file") + "."}, nil)
-		return
+		fileID, name = m.Document.FileID, cmp.Or(m.Document.FileName, "file")
+		isImage = strings.HasPrefix(m.Document.MimeType, "image/")
 	}
 	if fileID != "" {
 		msg.Text = m.Caption
 		data, err := t.download(ctx, fileID)
 		if err != nil {
-			t.log.Warn("telegram image download failed", "err", err)
-			t.call(ctx, "sendMessage", map[string]any{"chat_id": m.Chat.ID, "text": "I couldn't download that image: " + err.Error()}, nil)
+			t.log.Warn("telegram download failed", "err", err)
+			t.call(ctx, "sendMessage", map[string]any{"chat_id": m.Chat.ID, "text": "I couldn't download that file: " + err.Error()}, nil)
 			return
 		}
-		msg.Images = []media.Image{{Name: name, Data: data}}
+		if isImage {
+			msg.Images = []media.Image{{Name: name, Data: data}}
+		} else {
+			msg.Files = []media.Image{{Name: name, Data: data}} // a document: for a project's sources
+		}
 	}
 	if len(msg.Images) == 0 && t.pending.Deliver(chat, m.Text) {
 		return
@@ -264,6 +266,7 @@ var TelegramCommands = [][2]string{
 	{"help", "commands and tags"},
 	{"profiles", "tags, models and availability"},
 	{"status", "version, this chat's profile, model servers"},
+	{"projects", "list projects; /project <name> attaches one"},
 	{"reset", "clear this chat's history and go back to @default"},
 }
 

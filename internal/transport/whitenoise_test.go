@@ -268,8 +268,8 @@ func TestCreatedAt(t *testing.T) {
 	}
 }
 
-// An image attachment is downloaded through wn-agent and its copy deleted; a
-// non-image attachment gets a reply; a photo without text is still a message.
+// Image and PDF attachments are downloaded through wn-agent and its copies
+// deleted; audio gets a reply; a photo without text is still a message.
 func TestWhiteNoiseImage(t *testing.T) {
 	f := newFakeAgent(t)
 	w := newTestWN(t, f)
@@ -278,6 +278,7 @@ func TestWhiteNoiseImage(t *testing.T) {
 	ev["message"].(map[string]any)["media"] = []any{
 		map[string]any{"file_name": "notes.pdf", "media_type": "application/pdf"},
 		map[string]any{"file_name": "cat.png", "media_type": "image/png"},
+		map[string]any{"file_name": "song.mp3", "media_type": "audio/mpeg"},
 	}
 	f.events <- ev
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -289,7 +290,10 @@ func TestWhiteNoiseImage(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(f.mediaDir, "dl-cat.png")); err == nil {
 		t.Error("wn-agent's copy not deleted")
 	}
-	if got := f.sentTexts(); len(got) != 1 || !strings.Contains(got[0], "skipped: notes.pdf") {
+	if len(m.Files) != 1 || m.Files[0].Name != "notes.pdf" {
+		t.Errorf("files = %+v", m.Files)
+	}
+	if got := f.sentTexts(); len(got) != 1 || !strings.Contains(got[0], "skipped: song.mp3") {
 		t.Errorf("sent = %q", got)
 	}
 }

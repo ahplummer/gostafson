@@ -137,13 +137,19 @@ func TestImagePaths(t *testing.T) {
 	os.WriteFile(shot, []byte("\x89PNG..."), 0o600)
 	escaped := strings.ReplaceAll(shot, " ", `\ `)
 	for _, in := range []string{"look at " + escaped + " please", "look at '" + shot + "' please"} {
-		text, ims := ImagePaths(in, 0)
+		text, ims, _ := ImagePaths(in, 0)
 		if text != "look at [image #1] please" || len(ims) != 1 || ims[0].Name != "Screen Shot 1.png" {
 			t.Errorf("%q -> %q, %d images", in, text, len(ims))
 		}
 	}
-	if text, ims := ImagePaths("see /no/such/file.png and notes.txt", 2); len(ims) != 0 || text != "see /no/such/file.png and notes.txt" {
+	if text, ims, _ := ImagePaths("see /no/such/file.png and notes.txt", 2); len(ims) != 0 || text != "see /no/such/file.png and notes.txt" {
 		t.Errorf("missing file: %q, %d", text, len(ims))
+	}
+	manual := filepath.Join(dir, "Owner Manual.pdf")
+	os.WriteFile(manual, []byte("%PDF-1.4"), 0o600)
+	text, ims, docs := ImagePaths("/add "+strings.ReplaceAll(manual, " ", `\ `), 0)
+	if text != "/add [file: Owner Manual.pdf]" || len(ims) != 0 || len(docs) != 1 || string(docs[0].Data) != "%PDF-1.4" {
+		t.Errorf("document: %q, %d images, %d docs", text, len(ims), len(docs))
 	}
 }
 

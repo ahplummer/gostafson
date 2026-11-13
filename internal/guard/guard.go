@@ -121,13 +121,43 @@ type Turn struct {
 	traceID    string
 	parentSpan string
 	approver   Approver
+	extra      map[string]tools.Tool // added for this turn (a project's tools)
+}
+
+// With adds tools for this turn only, such as an attached project's search
+// tools (PRD D37). They go through the same checks, approvals and audit
+// records as the profile's own; everything else stays denied.
+func (t *Turn) With(extra map[string]tools.Tool) *Turn {
+	t.extra = extra
+	return t
+}
+
+// names returns the allowed tool names for this turn, sorted.
+func (t *Turn) names() []string {
+	names := t.g.Tools()
+	for n := range t.extra {
+		if _, ok := t.g.allowed[n]; !ok {
+			names = append(names, n)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+func (t *Turn) tool(name string) (tools.Tool, bool) {
+	if tl, ok := t.g.allowed[name]; ok {
+		return tl, true
+	}
+	tl, ok := t.extra[name]
+	return tl, ok
 }
 
 // Definitions returns the schemas of the allowed tools, sorted by name.
 func (t *Turn) Definitions() []client.Tool {
 	var defs []client.Tool
-	for _, n := range t.g.Tools() {
-		defs = append(defs, t.g.allowed[n].Def)
+	for _, n := range t.names() {
+		tl, _ := t.tool(n)
+		defs = append(defs, tl.Def)
 	}
 	return defs
 }
@@ -156,7 +186,7 @@ func (t *Turn) Call(ctx context.Context, name, arguments string) (string, error)
 }
 
 func (t *Turn) run(ctx context.Context, name, arguments string, rec *audit.ToolCall) (string, error) {
-	tool, ok := t.g.allowed[name]
+	tool, ok := t.tool(name)
 	if !ok {
 		rec.Guard = "deny"
 		if _, exists := tools.All()[name]; exists {
@@ -164,7 +194,7 @@ func (t *Turn) run(ctx context.Context, name, arguments string, rec *audit.ToolC
 		} else {
 			rec.Reason = "unknown tool"
 		}
-		return "", fmt.Errorf("%s: %q (available: %s)", rec.Reason, name, strings.Join(t.g.Tools(), ", "))
+		return "", fmt.Errorf("%s: %q (available: %s)", rec.Reason, name, strings.Join(t.names(), ", "))
 	}
 
 	args := json.RawMessage(arguments)

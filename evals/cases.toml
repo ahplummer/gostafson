@@ -226,3 +226,40 @@ name = "image-thin"   # 724x31: qwen's vision encoder needs 32 px a side; Prepar
 profile = "default"
 images = ["images/thin-line.png"]
 input = "Describe this image in one short sentence."
+
+# projects (PRD D37): a fresh project with evals/fixtures/projects/<name> as
+# its sources, attached to every turn
+
+[[case]]
+name = "project-oil"
+profile = "default"
+project = "camper-van"
+input = "What engine oil should I use, and how much?"
+reply_all = ["5W-20"]
+reply_any = ["6 quarts", "six quarts", "6 qt"]
+
+[[case]]
+name = "project-garage"   # no word in common with the manual's shore power page
+profile = "default"
+project = "camper-van"
+input = "My sticker says max branch circuit 30 amps. Can I plug into my 20 amp garage outlet?"
+reply_any = ["adapter", "dogbone"]
+
+[[case]]
+name = "project-markdown-source"
+profile = "default"
+project = "camper-van"
+input = "How often should I check the water heater anode?"
+reply_any = ["every year", "annually", "yearly", "once a year", "each year"]
+
+[[case]]
+name = "project-remember"
+profile = "default"
+project = "camper-van"
+approve = "yes"
+input = "Remember that my van is a 2023 model on a 3500 chassis."
+want_tools = ["remember"]
+want_ask = true
+[[case.files]]
+path = ".projects/camper-van/memory.md"
+contains = ["2023", "3500"]

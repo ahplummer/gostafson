@@ -13,6 +13,7 @@ import (
 	"maps"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -287,10 +288,10 @@ func (w *WhiteNoise) Receive(ctx context.Context) (Message, error) {
 		}
 		w.noteArrival(m.ChatID, ev)
 		w.fetchImages(ctx, ev, &m)
-		if len(m.Images) == 0 && strings.TrimSpace(m.Text) == "" {
-			continue // only non-image attachments, already answered
+		if len(m.Images)+len(m.Files) == 0 && strings.TrimSpace(m.Text) == "" {
+			continue // only unsupported attachments, already answered
 		}
-		if len(m.Images) == 0 && w.pending.Deliver(m.ChatID, m.Text) {
+		if len(m.Images)+len(m.Files) == 0 && w.pending.Deliver(m.ChatID, m.Text) {
 			continue
 		}
 		return m, nil
@@ -393,9 +394,10 @@ func (w *WhiteNoise) hold(ctx context.Context, chat string) error {
 	}
 }
 
-// fetchImages downloads a message's image attachments through wn-agent
+// fetchImages downloads a message's attachments through wn-agent
 // (download_media writes the decrypted file into its home, which this user
-// can read) and deletes wn-agent's copy. Other attachments get a short reply.
+// can read) and deletes wn-agent's copy. Images go to Images; PDFs and text
+// files to Files (for a project); anything else gets a short reply.
 func (w *WhiteNoise) fetchImages(ctx context.Context, ev map[string]any, m *Message) {
 	msg, _ := ev["message"].(map[string]any)
 	refs, _ := msg["media"].([]any)
@@ -408,21 +410,39 @@ func (w *WhiteNoise) fetchImages(ctx context.Context, ev map[string]any, m *Mess
 		}
 		mt, _ := ref["media_type"].(string)
 		name, _ := ref["file_name"].(string)
-		if mt != "" && !strings.HasPrefix(mt, "image/") {
+		isImage := mt == "" || strings.HasPrefix(mt, "image/")
+		if !isImage && !isDocument(mt, name) {
 			skipped = append(skipped, cmp.Or(name, mt))
 			continue
 		}
 		data, err := w.downloadMedia(ctx, group, ref)
 		if err != nil {
-			w.log.Warn("whitenoise image download failed", "err", err)
-			skipped = append(skipped, cmp.Or(name, "an image")+" (download failed)")
+			w.log.Warn("whitenoise download failed", "err", err)
+			skipped = append(skipped, cmp.Or(name, "a file")+" (download failed)")
 			continue
 		}
-		m.Images = append(m.Images, media.Image{Name: name, Data: data})
+		if isImage {
+			m.Images = append(m.Images, media.Image{Name: name, Data: data})
+		} else {
+			m.Files = append(m.Files, media.Image{Name: name, Data: data})
+		}
 	}
 	if len(skipped) > 0 {
-		w.Send(ctx, m.ChatID, "I can only read images; skipped: "+strings.Join(skipped, ", "))
+		w.Send(ctx, m.ChatID, "I can read images, PDFs and text files; skipped: "+strings.Join(skipped, ", "))
 	}
+}
+
+// isDocument reports a PDF or text attachment, by media type or file name.
+func isDocument(mt, name string) bool {
+	switch mt {
+	case "application/pdf", "text/plain", "text/markdown", "text/csv":
+		return true
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".pdf", ".txt", ".md", ".markdown", ".csv":
+		return true
+	}
+	return false
 }
 
 func (w *WhiteNoise) downloadMedia(ctx context.Context, group string, ref map[string]any) ([]byte, error) {

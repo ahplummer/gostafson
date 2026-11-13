@@ -26,6 +26,7 @@ import (
 	"github.com/ahplummer/gostafson/internal/config"
 	"github.com/ahplummer/gostafson/internal/evals"
 	"github.com/ahplummer/gostafson/internal/loop"
+	"github.com/ahplummer/gostafson/internal/projects"
 )
 
 func main() {
@@ -93,7 +94,11 @@ func run(cfgPath, casesF, fixtures, models, only string, repeat, ctxSize int, ca
 		m = strings.TrimSpace(m)
 		s := summary{model: m}
 		env := evals.Env{Profiles: map[string]*config.Profile{}, Clients: map[string]loop.Chatter{},
-			Default: cfg.DefaultProfile, Fixtures: fixtures, MaxSteps: cfg.Loop.MaxSteps}
+			Default: cfg.DefaultProfile, Fixtures: fixtures, MaxSteps: cfg.Loop.MaxSteps,
+			OCRCache: filepath.Join(os.TempDir(), "gostafson-eval-ocr")}
+		if m := cfg.Projects.EmbedModel; m != "none" {
+			env.Embedder = &projects.OllamaEmbedder{Client: client.New(cfg.Profiles[cfg.DefaultProfile].BaseURL, ""), Model: m}
+		}
 		for name, orig := range cfg.Profiles {
 			if orig.Remote() {
 				continue

@@ -232,3 +232,21 @@ func TestWebImage(t *testing.T) {
 		t.Errorf("bad base64 = %d", code)
 	}
 }
+
+// A document from the page arrives in Files; the history event names it.
+func TestWebDocument(t *testing.T) {
+	w, srv, c := webServer(t)
+	login(t, srv, c, "s3cret-token")
+	if code := post(t, c, srv.URL+"/api/send", `{"text":"/add","files":[{"name":"manual.pdf","data":"JVBERi0xLjQ="}]}`, true); code != http.StatusNoContent {
+		t.Fatalf("send = %d", code)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	m, err := w.Receive(ctx)
+	if err != nil || len(m.Files) != 1 || m.Files[0].Name != "manual.pdf" || string(m.Files[0].Data) != "%PDF-1.4" {
+		t.Fatalf("receive = %+v, %v", m, err)
+	}
+	if last := w.history[len(w.history)-1]; len(last.Files) != 1 || last.Files[0] != "manual.pdf" {
+		t.Errorf("event = %+v", last)
+	}
+}

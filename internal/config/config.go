@@ -28,7 +28,18 @@ type Config struct {
 	Telegram       Telegram            `toml:"telegram"`
 	WhiteNoise     WhiteNoise          `toml:"whitenoise"`
 	Loop           Loop                `toml:"loop"`
+	Projects       Projects            `toml:"projects"`
 	Profiles       map[string]*Profile `toml:"profiles"`
+}
+
+// Projects configures project directories and their search (PRD D37).
+type Projects struct {
+	// Dir holds one directory per project. Default: "projects" beside the
+	// sessions database.
+	Dir string `toml:"dir"`
+	// EmbedModel is the Ollama model for meaning search, on the default
+	// profile's server. "none" turns meaning search off (keyword only).
+	EmbedModel string `toml:"embed_model"`
 }
 
 // Sessions configures conversation history storage.
@@ -149,6 +160,11 @@ func Load(path string) (*Config, error) {
 	c.Sessions.Path = resolve(base, c.Sessions.Path)
 	c.SecretsFile = resolve(base, c.SecretsFile)
 	c.Audit.Path = resolve(base, c.Audit.Path)
+	if c.Projects.Dir == "" {
+		c.Projects.Dir = filepath.Join(filepath.Dir(c.Sessions.Path), "projects")
+	} else {
+		c.Projects.Dir = resolve(base, expandHome(c.Projects.Dir))
+	}
 	c.WhiteNoise.Socket = resolve(base, expandHome(c.WhiteNoise.Socket))
 	c.WhiteNoise.AuthTokenFile = resolve(base, expandHome(c.WhiteNoise.AuthTokenFile))
 	for _, p := range c.Profiles {
@@ -207,6 +223,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Loop.TurnTimeout == 0 {
 		c.Loop.TurnTimeout = 120 * time.Second
+	}
+	if c.Projects.EmbedModel == "" {
+		c.Projects.EmbedModel = "nomic-embed-text"
 	}
 	for name, p := range c.Profiles {
 		if p == nil {

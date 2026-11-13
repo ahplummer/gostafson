@@ -20,6 +20,7 @@ import (
 	"github.com/ahplummer/gostafson/internal/guard"
 	"github.com/ahplummer/gostafson/internal/loop"
 	"github.com/ahplummer/gostafson/internal/media"
+	"github.com/ahplummer/gostafson/internal/projects"
 	"github.com/ahplummer/gostafson/internal/router"
 	"github.com/ahplummer/gostafson/internal/sessions"
 )
@@ -39,6 +40,9 @@ type Case struct {
 	// Images are files under the fixtures dir sent with the first message
 	// (prepared like any transport's images, PRD D34).
 	Images []string `toml:"images"`
+	// Project names a directory under the fixtures dir whose files become the
+	// sources of a fresh project attached to every turn, as /project does.
+	Project string `toml:"project"`
 	// Approve answers every approval question: "yes" approves, anything else denies.
 	Approve string `toml:"approve"`
 	// WantAsk, when set, requires (true) or forbids (false) an approval question.
@@ -109,6 +113,8 @@ type Env struct {
 	Clients  map[string]loop.Chatter
 	Fixtures string
 	MaxSteps int
+	Embedder projects.Embedder // for project cases; nil: keyword search only
+	OCRCache string            // where the OCR helper is compiled
 }
 
 // Run runs one case in a fresh copy of its fixture.
@@ -162,6 +168,26 @@ func Run(ctx context.Context, env Env, cs Case) Result {
 			g.Close()
 		}
 	}()
+	var proj *projects.Project
+	if cs.Project != "" {
+		store, err := projects.NewStore(filepath.Join(root, ".projects"), &projects.Extractor{CacheDir: env.OCRCache}, env.Embedder)
+		if err == nil {
+			defer store.Close()
+			if proj, err = store.Create(cs.Project); err == nil {
+				err = os.CopyFS(filepath.Join(proj.Dir, "sources"), os.DirFS(filepath.Join(env.Fixtures, "projects", cs.Project)))
+			}
+			if err == nil {
+				var rep projects.SyncReport
+				if rep, err = proj.Index.Sync(ctx, nil); err == nil && len(rep.Failed) > 0 {
+					err = fmt.Errorf("sources failed: %v", rep.Failed)
+				}
+			}
+		}
+		if err != nil {
+			r.Err = "project: " + err.Error()
+			return r
+		}
+	}
 	var ims []media.Image
 	for _, f := range cs.Images {
 		data, err := os.ReadFile(filepath.Join(env.Fixtures, f))
@@ -210,7 +236,14 @@ func Run(ctx context.Context, env Env, cs Case) Result {
 		}
 		// Label other profiles' replies as the chat does (PRD D36), on a copy:
 		// the next turn may be a different profile.
-		turn := loop.Turn{Profile: p, History: sessions.LabelOthers(slices.Clone(history), name, models), Input: input, MaxSteps: env.MaxSteps}
+		tp := p
+		if proj != nil { // as main does for an attached project
+			pp := *p
+			pp.SystemPrompt = strings.TrimSpace(pp.SystemPrompt + "\n\n" + proj.Context(ctx, true) + proj.Passages(ctx, input))
+			tp = &pp
+			tools.inner = g.ForTurn("eval", "", "", ap).With(proj.Tools(p.Remote()))
+		}
+		turn := loop.Turn{Profile: tp, History: sessions.LabelOthers(slices.Clone(history), name, models), Input: input, MaxSteps: env.MaxSteps}
 		if i == 0 {
 			turn.Images = ims
 		}

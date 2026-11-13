@@ -160,13 +160,13 @@ func (c *CLI) receiveEdited(ctx context.Context) (Message, error) {
 		}
 		switch strings.TrimSpace(l.Text) {
 		case "":
-			if len(l.Images) == 0 {
+			if len(l.Images)+len(l.Files) == 0 {
 				continue
 			}
 		case "/exit", "/quit":
 			return Message{}, io.EOF
 		}
-		return Message{ChatID: c.ChatID, Sender: "local", Text: tagFirst(l.Text), Images: l.Images}, nil
+		return Message{ChatID: c.ChatID, Sender: "local", Text: tagFirst(l.Text), Images: l.Images, Files: l.Files}, nil
 	}
 }
 

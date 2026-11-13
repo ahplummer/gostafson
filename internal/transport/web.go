@@ -55,6 +55,7 @@ type webEvent struct {
 	Type   string    `json:"type"` // user | reply | busy | idle | ask | answered
 	Text   string    `json:"text,omitempty"`
 	Images int       `json:"images,omitempty"` // images sent with a user message (the data isn't kept)
+	Files  []string  `json:"files,omitempty"`  // names of documents sent with it
 	Time   time.Time `json:"time"`
 }
 
@@ -255,12 +256,14 @@ func (w *Web) events(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Web) send(rw http.ResponseWriter, r *http.Request) {
+	type upload struct {
+		Name string
+		Data string // base64, without the data: prefix
+	}
 	var body struct {
 		Text   string
-		Images []struct {
-			Name string
-			Data string // base64, without the data: prefix
-		}
+		Images []upload
+		Files  []upload // documents (PDF, text) for a project
 	}
 	// The page scales images down before sending; this limit allows a few
 	// at full size anyway.
@@ -269,26 +272,34 @@ func (w *Web) send(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	text := strings.TrimSpace(body.Text)
-	var ims []media.Image
-	for _, im := range body.Images {
-		data, err := base64.StdEncoding.DecodeString(im.Data)
-		if err != nil {
-			http.Error(rw, "bad image data", http.StatusBadRequest)
-			return
+	decode := func(ups []upload) ([]media.Image, bool) {
+		var out []media.Image
+		for _, u := range ups {
+			data, err := base64.StdEncoding.DecodeString(u.Data)
+			if err != nil {
+				return nil, false
+			}
+			out = append(out, media.Image{Name: u.Name, Data: data})
 		}
-		ims = append(ims, media.Image{Name: im.Name, Data: data})
+		return out, true
 	}
-	if text == "" && len(ims) == 0 {
+	ims, ok1 := decode(body.Images)
+	files, ok2 := decode(body.Files)
+	if !ok1 || !ok2 {
+		http.Error(rw, "bad file data", http.StatusBadRequest)
+		return
+	}
+	if text == "" && len(ims)+len(files) == 0 {
 		rw.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if len(ims) == 0 && w.pending.Deliver(WebChat, text) { // an answer: Ask publishes it with the question
+	if len(ims)+len(files) == 0 && w.pending.Deliver(WebChat, text) { // an answer: Ask publishes it with the question
 		rw.WriteHeader(http.StatusNoContent)
 		return
 	}
-	w.publish(webEvent{Type: "user", Text: text, Images: len(ims)})
+	w.publish(webEvent{Type: "user", Text: text, Images: len(ims), Files: names(files)})
 	select {
-	case w.in <- Message{ChatID: WebChat, Sender: "web", Text: text, Images: ims}:
+	case w.in <- Message{ChatID: WebChat, Sender: "web", Text: text, Images: ims, Files: files}:
 		rw.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(rw, "too many messages waiting", http.StatusTooManyRequests)
@@ -353,4 +364,12 @@ func (w *Web) Ask(ctx context.Context, chatID, question string) (string, error) 
 		return "", err
 	}
 	return ans, nil
+}
+
+func names(files []media.Image) []string {
+	var out []string
+	for _, f := range files {
+		out = append(out, f.Name)
+	}
+	return out
 }

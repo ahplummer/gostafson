@@ -20,12 +20,15 @@ func (a *app) command(ctx context.Context, chatID, text string) string {
 			return "error: " + err.Error()
 		}
 		a.sticky.Reset(chatID)
+		a.setProject(chatID, "")
 		if err := a.images.Reset(chatID); err != nil {
 			return "error: " + err.Error()
 		}
-		return fmt.Sprintf("history cleared; back on @%s", a.cfg.DefaultProfile)
+		return fmt.Sprintf("history cleared; back on @%s, no project", a.cfg.DefaultProfile)
 	case "/profiles":
 		return a.profiles()
+	case "/projects", "/project":
+		return a.projectCommand(ctx, chatID, text)
 	case "/status":
 		return a.status(ctx, chatID)
 	default:
@@ -41,7 +44,9 @@ func (a *app) help(chatID string) string {
 	return fmt.Sprintf(`commands:
   /profiles  tags, models and availability
   /status    version, history size, model servers
-  /reset     clear this chat's history and go back to @%[3]s
+  /reset     clear this chat's history and go back to @%[3]s, no project
+  /projects  list projects; /project <name> attaches one, /project off detaches
+  /project new <name>   create a project; send files with the caption /add to add sources
   /help      this list
   /exit      quit (CLI only; also /quit or Ctrl-D)
 tags: %[1]s (no tag: @%[2]s)
@@ -105,6 +110,9 @@ func (a *app) status(ctx context.Context, chatID string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "gostafson %s\n", version)
 	fmt.Fprintf(&b, "default profile: @%s; this chat: @%s\n", a.cfg.DefaultProfile, a.sticky.Active(chatID))
+	if p := a.project(chatID); p != nil {
+		fmt.Fprintf(&b, "project: %s\n", p.Name)
+	}
 	if n, err := a.store.Count(ctx, chatID); err != nil {
 		fmt.Fprintf(&b, "history: error: %v\n", err)
 	} else {

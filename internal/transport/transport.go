@@ -15,6 +15,7 @@ type Message struct {
 	Sender string
 	Text   string
 	Images []media.Image // as received (name and bytes); main checks and resizes them
+	Files  []media.Image // documents (PDF, text) as received, for a project's sources
 }
 
 // Transport receives messages and sends replies.

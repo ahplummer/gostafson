@@ -36,7 +36,8 @@ type Turn struct {
 	PromptTokens     int       `json:"prompt_tokens"`
 	CompletionTokens int       `json:"completion_tokens"`
 	DurationMS       int64     `json:"duration_ms"`
-	Images           []Image   `json:"images,omitempty"` // images sent with the message: never the data
+	Images           []Image   `json:"images,omitempty"`  // images sent with the message: never the data
+	Project          string    `json:"project,omitempty"` // the attached project, when its context and tools were used
 	Error            string    `json:"error,omitempty"`
 }
 

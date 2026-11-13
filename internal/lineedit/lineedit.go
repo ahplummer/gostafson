@@ -47,10 +47,11 @@ type Editor struct {
 	pending []byte // bytes read but not yet decoded
 }
 
-// Line is one submitted line and the images attached to it.
+// Line is one submitted line and what is attached to it.
 type Line struct {
 	Text   string
 	Images []media.Image
+	Files  []media.Image // documents (PDF, text) dragged in, for a project
 }
 
 // Options for one ReadLine call.
@@ -534,17 +535,18 @@ func (e *Editor) submit(s *state) Line {
 			ims = append(ims, s.images[n])
 		}
 	}
-	text, files := ImagePaths(text, s.nextImg)
-	return Line{Text: text, Images: append(ims, files...)}
+	text, dropped, docs := ImagePaths(text, s.nextImg)
+	return Line{Text: text, Images: append(ims, dropped...), Files: docs}
 }
 
 var pathToken = regexp.MustCompile(`'[^']+'|"[^"]+"|(?:\\ |[^\s'"])+`)
 
-// ImagePaths finds paths of existing image files in text, reads them, and
-// replaces each path with "[image #n]", numbering after the n images already
-// attached. Terminals quote a dropped path or escape its spaces.
-func ImagePaths(text string, n int) (string, []media.Image) {
-	var ims []media.Image
+// ImagePaths finds paths of existing image and document files in text,
+// reads them, and replaces each path with "[image #n]" (numbering after the
+// n images already attached) or "[file: name]". Terminals quote a dropped
+// path or escape its spaces.
+func ImagePaths(text string, n int) (string, []media.Image, []media.Image) {
+	var ims, docs []media.Image
 	out := pathToken.ReplaceAllStringFunc(text, func(tok string) string {
 		p := strings.Trim(tok, `'"`)
 		p = strings.ReplaceAll(p, `\ `, " ")
@@ -553,8 +555,11 @@ func ImagePaths(text string, n int) (string, []media.Image) {
 				p = filepath.Join(home, p[2:])
 			}
 		}
+		doc := false
 		switch strings.ToLower(filepath.Ext(p)) {
 		case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic":
+		case ".pdf", ".txt", ".md", ".markdown", ".csv":
+			doc = true
 		default:
 			return tok
 		}
@@ -569,10 +574,14 @@ func ImagePaths(text string, n int) (string, []media.Image) {
 		if err != nil {
 			return tok
 		}
+		if doc {
+			docs = append(docs, media.Image{Name: filepath.Base(p), Data: data})
+			return "[file: " + filepath.Base(p) + "]"
+		}
 		ims = append(ims, media.Image{Name: filepath.Base(p), Data: data})
 		return fmt.Sprintf("[image #%d]", n+len(ims))
 	})
-	return out, ims
+	return out, ims, docs
 }
 
 // --- drawing ---

@@ -118,9 +118,11 @@ function showAttachments() {
   attachments.hidden = pending.length === 0;
   pending.forEach((p, i) => {
     const chip = document.createElement("div"); chip.className = "chip";
-    const img = document.createElement("img"); img.src = p.url; img.alt = p.name;
+    let img;
+    if (p.doc) { img = document.createElement("div"); img.className = "doc"; img.textContent = "📄 " + p.name; }
+    else { img = document.createElement("img"); img.src = p.url; img.alt = p.name; }
     const x = document.createElement("button"); x.type = "button"; x.textContent = "×"; x.title = "Remove";
-    x.onclick = () => { URL.revokeObjectURL(p.url); pending.splice(i, 1); showAttachments(); };
+    x.onclick = () => { if (p.url) URL.revokeObjectURL(p.url); pending.splice(i, 1); showAttachments(); };
     chip.append(img, x); attachments.append(chip);
   });
 }
@@ -140,8 +142,13 @@ async function shrink(file) {
 
 async function addFiles(files) {
   for (const f of files) {
-    if (!f.type.startsWith("image/")) { add("note", f.name + " isn't an image"); continue; }
-    if (pending.length >= 4) { add("note", "up to 4 images per message"); break; }
+    if (pending.length >= 4) { add("note", "up to 4 files per message"); break; }
+    if (!f.type.startsWith("image/")) {
+      if (!/\.(pdf|txt|md|markdown|csv)$/i.test(f.name)) { add("note", f.name + ": I can take images, PDFs and text files"); continue; }
+      if (f.size > 20 << 20) { add("note", f.name + " is over 20 MB"); continue; }
+      pending.push({ name: f.name, blob: f, doc: true }); // a document for the project
+      continue;
+    }
     const blob = await shrink(f);
     pending.push({ name: f.name || "pasted.png", blob, url: URL.createObjectURL(blob) });
   }
@@ -161,6 +168,11 @@ function addUser(e) {
   const div = document.createElement("div");
   div.className = "msg user";
   div.textContent = e.text || "";
+  if (e.files && e.files.length) {
+    const docs = document.createElement("div"); docs.className = "thumbs";
+    docs.textContent = e.files.map(n => "📄 " + n).join("  ");
+    div.append(docs);
+  }
   if (e.images) {
     const thumbs = document.createElement("div"); thumbs.className = "thumbs";
     const mine = sentPreviews.shift();
@@ -175,13 +187,14 @@ function addUser(e) {
   log.scrollTop = log.scrollHeight;
 }
 
-async function send(t, imgs = []) {
-  const images = [];
-  for (const p of imgs) images.push({ name: p.name, data: await toBase64(p.blob) });
+async function send(t, items = []) {
+  const images = [], files = [];
+  for (const p of items) (p.doc ? files : images).push({ name: p.name, data: await toBase64(p.blob) });
+  const imgs = items.filter(p => !p.doc);
   if (imgs.length) sentPreviews.push(imgs.map(p => p.url));
   const r = await fetch("/api/send", {
     method: "POST", headers: { "Content-Type": "application/json", "X-Gostafson": "1" },
-    body: JSON.stringify({ text: t, images }),
+    body: JSON.stringify({ text: t, images, files }),
   });
   if (r.status === 401) location.reload();
   else if (!r.ok) add("note", "send failed: " + r.status + " " + (await r.text()));
@@ -198,7 +211,7 @@ document.getElementById("compose").addEventListener("submit", ev => {
 document.getElementById("attach").addEventListener("click", () => fileInput.click());
 fileInput.addEventListener("change", () => { addFiles([...fileInput.files]); fileInput.value = ""; });
 text.addEventListener("paste", ev => {
-  const files = [...(ev.clipboardData?.files || [])].filter(f => f.type.startsWith("image/"));
+  const files = [...(ev.clipboardData?.files || [])];
   if (files.length) { ev.preventDefault(); addFiles(files); }
 });
 document.addEventListener("dragover", ev => { ev.preventDefault(); document.body.classList.add("dragging"); });

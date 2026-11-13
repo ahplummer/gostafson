@@ -23,6 +23,7 @@ import (
 	"github.com/ahplummer/gostafson/internal/guard"
 	"github.com/ahplummer/gostafson/internal/loop"
 	"github.com/ahplummer/gostafson/internal/media"
+	"github.com/ahplummer/gostafson/internal/projects"
 	"github.com/ahplummer/gostafson/internal/router"
 	"github.com/ahplummer/gostafson/internal/sessions"
 	"github.com/ahplummer/gostafson/internal/transport"
@@ -78,6 +79,17 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 		return err
 	}
 
+	var embedder projects.Embedder
+	if m := cfg.Projects.EmbedModel; m != "none" {
+		embedder = &projects.OllamaEmbedder{Client: client.New(cfg.Profiles[cfg.DefaultProfile].BaseURL, ""), Model: m}
+	}
+	extractor := &projects.Extractor{CacheDir: filepath.Join(cfg.Projects.Dir, ".cache")}
+	projectStore, err := projects.NewStore(cfg.Projects.Dir, extractor, embedder)
+	if err != nil {
+		return err
+	}
+	defer projectStore.Close()
+
 	clients := make(map[string]*client.Client, len(cfg.Profiles))
 	guards := make(map[string]*guard.Guard, len(cfg.Profiles))
 	for name, p := range cfg.Profiles {
@@ -99,13 +111,15 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 		models[name] = p.Model
 	}
 	a := &app{cfg: cfg, router: rt, sticky: sticky, images: images, vision: map[string]bool{}, models: models, store: store, clients: clients, guards: guards, audit: auditLog,
-		showReasoning: showReasoning, log: logger, workers: map[string]chan transport.Message{}}
+		showReasoning: showReasoning, log: logger, workers: map[string]chan transport.Message{},
+		projects: projectStore, attached: map[string]string{}}
+	extractor.Describe = a.describeImage
 
 	var trs []transport.Transport
 	var cli *transport.CLI
 	if cfg.CLI.On() {
 		cli = transport.NewStdio()
-		words := []string{"/help", "/profiles", "/status", "/reset", "/exit"}
+		words := []string{"/help", "/profiles", "/projects", "/project", "/add", "/status", "/reset", "/exit"}
 		for _, t := range rt.Tags() {
 			words = append(words, "@"+t)
 		}
@@ -158,6 +172,9 @@ type app struct {
 	sticky        *router.Sticky    // per-chat profile from the last sticky tag (PRD D32, D33)
 	images        *media.Store      // each chat's current images (PRD D34)
 	models        map[string]string // profile -> model, for labeling replies (PRD D36)
+	projects      *projects.Store
+	projMu        sync.Mutex
+	attached      map[string]string // chat -> attached project (PRD D37)
 	visionMu      sync.Mutex
 	vision        map[string]bool // profile -> takes images, filled on first use
 	store         *sessions.Store
@@ -177,8 +194,19 @@ type app struct {
 // Approvals go back over tr, the transport the message came from.
 func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.Message) string {
 	text := strings.TrimSpace(msg.Text)
+	if (text == "/add" || strings.HasPrefix(text, "/add ")) && len(msg.Images)+len(msg.Files) > 0 {
+		return a.addFiles(ctx, tr, msg.ChatID, append(msg.Images, msg.Files...), false)
+	}
+	added := ""
+	if len(msg.Files) > 0 { // a document: it can only be a project source
+		added = a.addFiles(ctx, tr, msg.ChatID, msg.Files, true)
+		if text == "" && len(msg.Images) == 0 {
+			return added
+		}
+		added += "\n\n"
+	}
 	if strings.HasPrefix(text, "/") && len(msg.Images) == 0 {
-		return a.command(ctx, msg.ChatID, text)
+		return added + a.command(ctx, msg.ChatID, text)
 	}
 	if len(msg.Images) > 0 && text == "" {
 		text = imagePrompt
@@ -243,6 +271,25 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	history = a.historyImages(ctx, msg.ChatID, route.Profile, history)
 	history = sessions.LabelOthers(history, route.Profile, a.models)
 
+	// The attached project: its context in the system prompt, its tools for
+	// this turn. Cloud profiles get it only with cloud = true (PRD D37).
+	runProfile := profile
+	var proj *projects.Project
+	if p := a.project(msg.ChatID); p != nil {
+		st, _ := p.Settings()
+		if profile.Remote() && !st.Cloud {
+			added += fmt.Sprintf("[project %s isn't shared with cloud profiles; set cloud = true in its project.toml to allow it]\n", p.Name)
+		} else {
+			proj = p
+			if rep, err := p.Index.Sync(ctx, nil); err == nil && len(rep.Failed) > 0 {
+				a.log.Warn("project sources unreadable", "project", p.Name, "failed", rep.Failed)
+			}
+			pp := *profile
+			pp.SystemPrompt = strings.TrimSpace(pp.SystemPrompt + "\n\n" + p.Context(ctx, true) + p.Passages(ctx, route.Text))
+			runProfile = &pp
+		}
+	}
+
 	turnCtx, cancel := context.WithTimeout(ctx, a.cfg.Loop.TurnTimeout)
 	defer cancel()
 	traceID, spanID := audit.NewTraceID(), audit.NewSpanID()
@@ -251,9 +298,12 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 		asker = ak
 	}
 	tools := a.guards[route.Profile].ForTurn(msg.ChatID, traceID, spanID, approve.New(asker, a.cfg.Approval.Timeout))
+	if proj != nil {
+		tools = tools.With(proj.Tools(profile.Remote())) // cloud profiles: search and read only
+	}
 	start := time.Now()
 	res, err := loop.Run(turnCtx, a.clients[route.Profile], tools, loop.Turn{
-		Profile:   profile,
+		Profile:   runProfile,
 		Think:     route.Think,
 		History:   history,
 		Input:     route.Text,
@@ -275,6 +325,9 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 		Chat: msg.ChatID, Profile: route.Profile, RoutedBy: routedBy, Model: profile.Model, Think: route.Think,
 		Steps: res.Steps, PromptTokens: res.Usage.PromptTokens, CompletionTokens: res.Usage.CompletionTokens,
 		DurationMS: elapsed.Milliseconds(),
+	}
+	if proj != nil {
+		rec.Project = proj.Name
 	}
 	for _, im := range ims {
 		rec.Images = append(rec.Images, audit.Image{Name: im.Name, MediaType: im.MediaType, Bytes: len(im.Data), SHA256: im.SHA256()})
@@ -299,6 +352,7 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	}
 
 	var b strings.Builder
+	b.WriteString(added)
 	if a.showReasoning && res.Reasoning != "" {
 		fmt.Fprintf(&b, "[reasoning]\n%s\n[/reasoning]\n\n", strings.TrimSpace(res.Reasoning))
 	}

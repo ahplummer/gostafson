@@ -39,6 +39,12 @@ allowed_senders = ["<your npub>"]
 max_steps = 8
 turn_timeout = "300s"      # includes time waiting for approvals
 
+# Projects (PRD D37): "/project NAME" in a chat. One directory per project;
+# sources are indexed for keyword and meaning search.
+# [projects]
+# dir = "var/projects"            # default: "projects" beside the sessions database
+# embed_model = "nomic-embed-text"  # on the default profile's Ollama; "none" = keyword search only
+
 [profiles.default]
 base_url = "http://localhost:11434/v1"
 model = "gostafson-qwen3.5-9b"

@@ -50,3 +50,33 @@ func (c *Client) Vision(ctx context.Context, model string) (bool, error) {
 	}
 	return slices.Contains(r.Capabilities, "vision") || slices.Contains(r.Data.Architecture.InputModalities, "image"), nil
 }
+
+// Embed returns embeddings for texts from an Ollama server (POST /api/embed).
+func (c *Client) Embed(ctx context.Context, model string, texts []string) ([][]float32, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	body, _ := json.Marshal(map[string]any{"model": model, "input": texts})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(c.BaseURL, "/v1")+"/api/embed", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("embed: %w", err)
+	}
+	defer resp.Body.Close()
+	var r struct {
+		Embeddings [][]float32 `json:"embeddings"`
+		Error      string      `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return nil, fmt.Errorf("embed: HTTP %d", resp.StatusCode)
+	}
+	if r.Error != "" || resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("embed: HTTP %d %s", resp.StatusCode, r.Error)
+	}
+	if len(r.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("embed: %d embeddings for %d texts", len(r.Embeddings), len(texts))
+	}
+	return r.Embeddings, nil
+}

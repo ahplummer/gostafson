@@ -199,8 +199,8 @@ func TestTelegramFallsBackToPlain(t *testing.T) {
 }
 
 // A photo with a caption arrives as one message with the largest size
-// downloaded; a non-image file gets a short reply instead; the command menu
-// is registered when receiving starts.
+// downloaded; a PDF arrives as a file; the command menu is registered when
+// receiving starts.
 func TestTelegramPhoto(t *testing.T) {
 	tg, bot := newFakeTelegram(t)
 	photo, _ := json.Marshal(map[string]any{"update_id": 1, "message": map[string]any{
@@ -214,11 +214,18 @@ func TestTelegramPhoto(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	m, err := tg.Receive(ctx)
-	if err != nil || m.Text != "what is this?" || len(m.Images) != 1 || !strings.HasSuffix(string(m.Images[0].Data), "JPEG BYTES") {
-		t.Fatalf("receive = %+v, %v", m, err)
+	if err != nil {
+		t.Fatal(err)
 	}
 	calls := strings.Join(bot.callList(), "\n")
-	for _, want := range []string{`setMyCommands {"commands":[{"command":"help"`, `getFile {"file_id":"large"}`, `I can only read images, not application/pdf`} {
+	// The PDF came first: it arrives as a file (for a project), the photo next.
+	if len(m.Files) != 1 || m.Files[0].Name != "a.pdf" {
+		t.Fatalf("first message = %+v", m)
+	}
+	if m, err = tg.Receive(ctx); err != nil || len(m.Images) != 1 || m.Text != "what is this?" {
+		t.Fatalf("second message = %+v, %v", m, err)
+	}
+	for _, want := range []string{`setMyCommands {"commands":[{"command":"help"`, `getFile {"file_id":"large"}`, `getFile {"file_id":"d"}`} {
 		if !strings.Contains(calls, want) {
 			t.Errorf("calls lack %s:\n%s", want, calls)
 		}

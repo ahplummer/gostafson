@@ -52,6 +52,7 @@ textarea:focus, input:focus { outline: none; border-color: var(--accent2); }
 #attachments { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 8px; }
 .chip { position: relative; }
 .chip img, .msg .thumbs img { height: 64px; border-radius: 6px; border: 1px solid #3a3446; display: block; }
+.chip .doc { height: 64px; display: flex; align-items: center; padding: 0 10px; border-radius: 6px; border: 1px solid #3a3446; background: var(--panel); font-size: 12px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip button { position: absolute; top: -6px; right: -6px; padding: 0 6px; border-radius: 10px; background: #3a3446; color: var(--text); font-size: 12px; }
 .msg .thumbs { display: flex; gap: 6px; margin-top: 4px; }
 body.dragging main { outline: 2px dashed var(--accent2); outline-offset: -4px; }

@@ -9,6 +9,10 @@ REMOTE_DIR  ?= /usr/local/libexec/gostafson
 SERVICE     ?= system/com.gostafson.agent
 KEEP        ?= 5
 AGENT_USER  ?= agent
+# projects.dir on the host (the default: beside the sessions database)
+REMOTE_PROJECTS ?= /Users/$(AGENT_USER)/var/projects
+PROJECT_FILES = find . -type f \( -iname '*.pdf' -o -iname '*.md' -o -iname '*.markdown' -o -iname '*.txt' -o -iname '*.csv' \
+  -o -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.heic' -o -iname '*.gif' -o -iname '*.webp' \) -not -path '*/.*' -print0
 REMOTE_SECRETS ?= /Users/$(AGENT_USER)/secrets.toml
 REMOTE_CONFIG  ?= /usr/local/etc/gostafson/config.toml
 HOST_CONFIG    ?= config.host.toml
@@ -20,7 +24,7 @@ TUNNEL_LMS_PORT    ?= 1234
 VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev)
 BIN     := dist/gostafson
 
-.PHONY: build test eval test-integration run tunnel models deploy rollback push-secrets push-config setup versions logs service-log service-status clean check-host
+.PHONY: build test eval push-project test-integration run tunnel models deploy rollback push-secrets push-config setup versions logs service-log service-status clean check-host
 
 # Fails fast, before test and build, when DEPLOY_HOST is missing.
 check-host:
@@ -112,6 +116,22 @@ push-secrets: check-host
 
 # Install config.host.toml as the host's config, owned by root (the agent can
 # read it but not change it). Checks first that it has no <placeholders> left.
+# Copy a folder's PDFs, text files and images into a project's sources on
+# the host (created if needed), owned by the agent. Indexing happens the next
+# time a chat attaches the project (/project NAME). Asks for the sudo password.
+#   make push-project NAME=camper DIR=~/Documents/Camper
+push-project: check-host
+	@echo "$(NAME)" | grep -Eq '^[a-z0-9][a-z0-9-]{0,39}$$' || { echo "usage: make push-project NAME=<lower-case-name> DIR=<folder>"; exit 1; }
+	@test -d "$(DIR)" || { echo "DIR=$(DIR) is not a folder"; exit 1; }
+	@cd "$(DIR)" && $(PROJECT_FILES) | tr '\0' '\n' | sed 's|^\./|  |'
+	@cd "$(DIR)" && $(PROJECT_FILES) | COPYFILE_DISABLE=1 tar --null -T - -czf - \
+	  | ssh $(DEPLOY_HOST) 'rm -rf .gostafson-project.tmp && mkdir .gostafson-project.tmp && tar -xzf - -C .gostafson-project.tmp'
+	@ssh -t $(DEPLOY_HOST) 'set -e; d=$(REMOTE_PROJECTS)/$(NAME); \
+	  sudo install -d -o $(AGENT_USER) -g $(AGENT_USER) -m 700 $(REMOTE_PROJECTS) $$d $$d/sources; \
+	  sudo cp -R .gostafson-project.tmp/. $$d/sources/; sudo chown -R $(AGENT_USER):$(AGENT_USER) $$d; sudo chmod -R go-rwx $$d; \
+	  rm -rf .gostafson-project.tmp'
+	@echo "copied into $(REMOTE_PROJECTS)/$(NAME)/sources; /project $(NAME) in a chat indexes them"
+
 push-config: check-host
 	@test -f $(HOST_CONFIG) || { echo "$(HOST_CONFIG) not found; copy config.host.example.toml and fill it in"; exit 1; }
 	@! grep -n '<[^>]*>' $(HOST_CONFIG) || { echo "replace the values in angle brackets above first"; exit 1; }

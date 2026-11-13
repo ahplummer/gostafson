@@ -11,6 +11,8 @@ import (
 
 	"github.com/ahplummer/gostafson/internal/approve"
 	"github.com/ahplummer/gostafson/internal/audit"
+	"github.com/ahplummer/gostafson/internal/client"
+	"github.com/ahplummer/gostafson/internal/tools"
 )
 
 const secret = "TOP-SECRET-OUTSIDE"
@@ -324,5 +326,45 @@ func TestRunThroughGuard(t *testing.T) {
 	want := "deny:arguments not allowed,deny:arguments not allowed,allow:,deny:not approved"
 	if got := strings.Join(reasons, ","); got != want {
 		t.Errorf("audit = %s, want %s", got, want)
+	}
+}
+
+// Tools added for one turn (a project's) run through the same checks,
+// approvals and audit records; the profile's other limits still apply.
+func TestTurnWithExtraTools(t *testing.T) {
+	g, _, logPath := fixture(t, "read_file")
+	extra := map[string]tools.Tool{
+		"project_search": {Def: client.Tool{Type: "function", Function: client.ToolFunction{Name: "project_search"}},
+			Run: func(context.Context, *os.Root, json.RawMessage) (string, error) { return "found it", nil }},
+		"remember": {Def: client.Tool{Type: "function", Function: client.ToolFunction{Name: "remember"}},
+			Run:     func(context.Context, *os.Root, json.RawMessage) (string, error) { return "saved", nil },
+			Confirm: func(*os.Root, json.RawMessage) string { return "remember this?" }},
+	}
+	ap := &fakeApprover{result: approve.Denied}
+	turn := g.ForTurn("c", "t", "s", ap).With(extra)
+	var names []string
+	for _, d := range turn.Definitions() {
+		names = append(names, d.Function.Name)
+	}
+	if got := strings.Join(names, ","); got != "project_search,read_file,remember" {
+		t.Errorf("definitions = %s", got)
+	}
+	ctx := context.Background()
+	if out, err := turn.Call(ctx, "project_search", `{"query":"oil"}`); err != nil || out != "found it" {
+		t.Errorf("project_search = %q, %v", out, err)
+	}
+	if _, err := turn.Call(ctx, "remember", `{"fact":"x"}`); err == nil || len(ap.asked) != 1 {
+		t.Errorf("remember without approval: err %v, asked %q", err, ap.asked)
+	}
+	if _, err := turn.Call(ctx, "write_file", `{"path":"a.txt","content":"x"}`); err == nil {
+		t.Error("write_file allowed by a project")
+	}
+	// A turn without With has none of them.
+	if _, err := g.ForTurn("c", "t", "s", ap).Call(ctx, "project_search", `{}`); err == nil {
+		t.Error("project_search without a project")
+	}
+	b, _ := os.ReadFile(logPath)
+	if n := strings.Count(string(b), `"tool":"project_search"`); n != 2 {
+		t.Errorf("audit has %d project_search records, want 2", n)
 	}
 }
