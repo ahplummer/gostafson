@@ -5,6 +5,8 @@ package transport
 import (
 	"context"
 	"sync"
+
+	"github.com/ahplummer/gostafson/internal/media"
 )
 
 // Message is one incoming message.
@@ -12,6 +14,7 @@ type Message struct {
 	ChatID string // conversation key, prefixed by transport ("web:", "tg:"); history is stored per chat
 	Sender string
 	Text   string
+	Images []media.Image // as received (name and bytes); main checks and resizes them
 }
 
 // Transport receives messages and sends replies.

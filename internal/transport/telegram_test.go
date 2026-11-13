@@ -23,6 +23,10 @@ type fakeBot struct {
 
 func (f *fakeBot) handler(t *testing.T) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/file/botTOKEN/photos/p1.jpg" {
+			io.WriteString(w, "\xff\xd8\xff JPEG BYTES")
+			return
+		}
 		if !strings.HasPrefix(r.URL.Path, "/botTOKEN/") {
 			t.Errorf("path %q", r.URL.Path)
 		}
@@ -37,6 +41,10 @@ func (f *fakeBot) handler(t *testing.T) http.Handler {
 			return
 		}
 		f.calls = append(f.calls, method+" "+string(body))
+		if method == "getFile" {
+			io.WriteString(w, `{"ok":true,"result":{"file_path":"photos/p1.jpg","file_size":15}}`)
+			return
+		}
 		io.WriteString(w, `{"ok":true,"result":{}}`)
 	})
 }
@@ -187,5 +195,32 @@ func TestTelegramFallsBackToPlain(t *testing.T) {
 	}
 	if len(bodies) != 2 || !strings.Contains(bodies[1], `"text":"**hi**"`) || strings.Contains(bodies[1], "parse_mode") {
 		t.Errorf("bodies = %q", bodies)
+	}
+}
+
+// A photo with a caption arrives as one message with the largest size
+// downloaded; a non-image file gets a short reply instead; the command menu
+// is registered when receiving starts.
+func TestTelegramPhoto(t *testing.T) {
+	tg, bot := newFakeTelegram(t)
+	photo, _ := json.Marshal(map[string]any{"update_id": 1, "message": map[string]any{
+		"from": map[string]any{"id": 42}, "chat": map[string]any{"id": 42, "type": "private"},
+		"caption": "what is this?",
+		"photo":   []map[string]any{{"file_id": "small", "file_size": 1}, {"file_id": "large", "file_size": 15}}}})
+	pdf, _ := json.Marshal(map[string]any{"update_id": 2, "message": map[string]any{
+		"from": map[string]any{"id": 42}, "chat": map[string]any{"id": 42, "type": "private"},
+		"document": map[string]any{"file_id": "d", "file_name": "a.pdf", "mime_type": "application/pdf"}}})
+	bot.push(string(pdf), string(photo))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	m, err := tg.Receive(ctx)
+	if err != nil || m.Text != "what is this?" || len(m.Images) != 1 || !strings.HasSuffix(string(m.Images[0].Data), "JPEG BYTES") {
+		t.Fatalf("receive = %+v, %v", m, err)
+	}
+	calls := strings.Join(bot.callList(), "\n")
+	for _, want := range []string{`setMyCommands {"commands":[{"command":"help"`, `getFile {"file_id":"large"}`, `I can only read images, not application/pdf`} {
+		if !strings.Contains(calls, want) {
+			t.Errorf("calls lack %s:\n%s", want, calls)
+		}
 	}
 }

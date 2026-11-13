@@ -77,7 +77,7 @@ let busy = false, asking = false, question = "";
 function handle(e) {
   switch (e.type) {
     case "ready": conn.textContent = "connected"; conn.className = "ok"; break;
-    case "user": add("user", e.text); break;
+    case "user": addUser(e); break;
     case "reply": add("reply", render(e.text), true); break;
     case "busy": busy = true; if (!asking) startSpin(); break;
     case "idle": busy = false; stopSpin(); break;
@@ -106,10 +106,82 @@ function connect() {
   };
 }
 
-async function send(t) {
+// Images: picked, pasted or dropped. Each is scaled to at most 1568 px on
+// its long side before upload (the server checks again).
+const attachments = document.getElementById("attachments");
+const fileInput = document.getElementById("file");
+let pending = [];        // [{name, blob, url}] waiting to be sent
+let sentPreviews = [];   // preview URLs of messages this page sent, matched to "user" events
+
+function showAttachments() {
+  attachments.textContent = "";
+  attachments.hidden = pending.length === 0;
+  pending.forEach((p, i) => {
+    const chip = document.createElement("div"); chip.className = "chip";
+    const img = document.createElement("img"); img.src = p.url; img.alt = p.name;
+    const x = document.createElement("button"); x.type = "button"; x.textContent = "×"; x.title = "Remove";
+    x.onclick = () => { URL.revokeObjectURL(p.url); pending.splice(i, 1); showAttachments(); };
+    chip.append(img, x); attachments.append(chip);
+  });
+}
+
+async function shrink(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+    if (scale === 1 && file.size < 4 << 20) return file;
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const type = file.type === "image/png" ? "image/png" : "image/jpeg";
+    return await new Promise(res => c.toBlob(b => res(b || file), type, 0.9));
+  } catch { return file; } // the server can still read (and scale) it
+}
+
+async function addFiles(files) {
+  for (const f of files) {
+    if (!f.type.startsWith("image/")) { add("note", f.name + " isn't an image"); continue; }
+    if (pending.length >= 4) { add("note", "up to 4 images per message"); break; }
+    const blob = await shrink(f);
+    pending.push({ name: f.name || "pasted.png", blob, url: URL.createObjectURL(blob) });
+  }
+  showAttachments();
+}
+
+function toBase64(blob) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(",", 2)[1]);
+    r.onerror = rej;
+    r.readAsDataURL(blob);
+  });
+}
+
+function addUser(e) {
+  const div = document.createElement("div");
+  div.className = "msg user";
+  div.textContent = e.text || "";
+  if (e.images) {
+    const thumbs = document.createElement("div"); thumbs.className = "thumbs";
+    const mine = sentPreviews.shift();
+    if (mine) {
+      for (const url of mine) { const img = document.createElement("img"); img.src = url; thumbs.append(img); }
+    } else {
+      thumbs.textContent = "🖼 " + e.images + (e.images === 1 ? " image" : " images");
+    }
+    div.append(thumbs);
+  }
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function send(t, imgs = []) {
+  const images = [];
+  for (const p of imgs) images.push({ name: p.name, data: await toBase64(p.blob) });
+  if (imgs.length) sentPreviews.push(imgs.map(p => p.url));
   const r = await fetch("/api/send", {
     method: "POST", headers: { "Content-Type": "application/json", "X-Gostafson": "1" },
-    body: JSON.stringify({ text: t }),
+    body: JSON.stringify({ text: t, images }),
   });
   if (r.status === 401) location.reload();
   else if (!r.ok) add("note", "send failed: " + r.status + " " + (await r.text()));
@@ -118,9 +190,22 @@ async function send(t) {
 document.getElementById("compose").addEventListener("submit", ev => {
   ev.preventDefault();
   const t = text.value.trim();
-  if (!t) return;
+  if (!t && !pending.length) return;
+  const imgs = pending; pending = []; showAttachments();
   text.value = ""; text.style.height = "";
-  send(t);
+  send(t, imgs);
+});
+document.getElementById("attach").addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => { addFiles([...fileInput.files]); fileInput.value = ""; });
+text.addEventListener("paste", ev => {
+  const files = [...(ev.clipboardData?.files || [])].filter(f => f.type.startsWith("image/"));
+  if (files.length) { ev.preventDefault(); addFiles(files); }
+});
+document.addEventListener("dragover", ev => { ev.preventDefault(); document.body.classList.add("dragging"); });
+document.addEventListener("dragleave", ev => { if (!ev.relatedTarget) document.body.classList.remove("dragging"); });
+document.addEventListener("drop", ev => {
+  ev.preventDefault(); document.body.classList.remove("dragging");
+  addFiles([...(ev.dataTransfer?.files || [])]);
 });
 text.addEventListener("keydown", ev => {
   if (ev.key === "Enter" && !ev.shiftKey && !ev.isComposing) {

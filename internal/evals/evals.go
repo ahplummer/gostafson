@@ -19,6 +19,7 @@ import (
 	"github.com/ahplummer/gostafson/internal/config"
 	"github.com/ahplummer/gostafson/internal/guard"
 	"github.com/ahplummer/gostafson/internal/loop"
+	"github.com/ahplummer/gostafson/internal/media"
 	"github.com/ahplummer/gostafson/internal/router"
 )
 
@@ -34,6 +35,9 @@ type Case struct {
 	// apply after the last turn, to its reply.
 	Turns        []string `toml:"turns"`
 	WantProfiles []string `toml:"want_profiles"` // the profile each turn must go to
+	// Images are files under the fixtures dir sent with the first message
+	// (prepared like any transport's images, PRD D34).
+	Images []string `toml:"images"`
 	// Approve answers every approval question: "yes" approves, anything else denies.
 	Approve string `toml:"approve"`
 	// WantAsk, when set, requires (true) or forbids (false) an approval question.
@@ -157,9 +161,23 @@ func Run(ctx context.Context, env Env, cs Case) Result {
 			g.Close()
 		}
 	}()
+	var ims []media.Image
+	for _, f := range cs.Images {
+		data, err := os.ReadFile(filepath.Join(env.Fixtures, f))
+		if err == nil {
+			var im media.Image
+			if im, err = media.Prepare(ctx, f, data); err == nil {
+				ims = append(ims, im)
+			}
+		}
+		if err != nil {
+			r.Err = fmt.Sprintf("image %s: %v", f, err)
+			return r
+		}
+	}
 	var history []client.Message
 	start := time.Now()
-	for _, text := range turns {
+	for i, text := range turns {
 		name, input, err := route(text)
 		if err != nil {
 			r.Err = err.Error()
@@ -185,11 +203,18 @@ func Run(ctx context.Context, env Env, cs Case) Result {
 			guards[name] = g
 		}
 		tools := &recorder{inner: g.ForTurn("eval", "", "", ap), ap: ap, r: &r}
-		res, err := loop.Run(ctx, &timer{inner: c, r: &r}, tools, loop.Turn{Profile: p, History: history, Input: input, MaxSteps: env.MaxSteps})
+		turn := loop.Turn{Profile: p, History: history, Input: input, MaxSteps: env.MaxSteps}
+		if i == 0 {
+			turn.Images = ims
+		}
+		res, err := loop.Run(ctx, &timer{inner: c, r: &r}, tools, turn)
 		r.Steps += res.Steps
 		r.Reply = res.Reply
 		r.Prompt += res.Usage.PromptTokens
 		r.Completion += res.Usage.CompletionTokens
+		if i == 0 && len(ims) > 0 && len(res.New) > 0 {
+			res.New[0].Images = ims // keep the image for follow-ups, as the chat does
+		}
 		history = append(history, res.New...)
 		if err != nil {
 			r.Err = err.Error()

@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -11,11 +12,14 @@ import (
 	"log/slog"
 	"maps"
 	"net"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ahplummer/gostafson/internal/media"
 )
 
 // WhiteNoise talks to a local wn-agent (the White Noise / Marmot connector)
@@ -136,7 +140,11 @@ func readFrame(r *bufio.Reader, id string) (map[string]any, error) {
 
 // request sends one request on a fresh connection and returns the response.
 func (w *WhiteNoise) request(ctx context.Context, payload map[string]any) (map[string]any, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	limit := 30 * time.Second
+	if payload["type"] == "download_media" {
+		limit = 2 * time.Minute // fetches and decrypts the file
+	}
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "unix", w.socket)
@@ -278,7 +286,11 @@ func (w *WhiteNoise) Receive(ctx context.Context) (Message, error) {
 			continue
 		}
 		w.noteArrival(m.ChatID, ev)
-		if w.pending.Deliver(m.ChatID, m.Text) {
+		w.fetchImages(ctx, ev, &m)
+		if len(m.Images) == 0 && strings.TrimSpace(m.Text) == "" {
+			continue // only non-image attachments, already answered
+		}
+		if len(m.Images) == 0 && w.pending.Deliver(m.ChatID, m.Text) {
 			continue
 		}
 		return m, nil
@@ -292,7 +304,8 @@ func (w *WhiteNoise) parse(ev map[string]any) (Message, bool) {
 	from, _ := sender["account_id_hex"].(string)
 	text, _ := msg["text"].(string)
 	from = strings.ToLower(from)
-	if group == "" || from == "" || strings.TrimSpace(text) == "" || from == w.account {
+	refs, _ := msg["media"].([]any)
+	if group == "" || from == "" || (strings.TrimSpace(text) == "" && len(refs) == 0) || from == w.account {
 		return Message{}, false
 	}
 	if !slices.Contains(w.allowed, from) {
@@ -378,6 +391,60 @@ func (w *WhiteNoise) hold(ctx context.Context, chat string) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// fetchImages downloads a message's image attachments through wn-agent
+// (download_media writes the decrypted file into its home, which this user
+// can read) and deletes wn-agent's copy. Other attachments get a short reply.
+func (w *WhiteNoise) fetchImages(ctx context.Context, ev map[string]any, m *Message) {
+	msg, _ := ev["message"].(map[string]any)
+	refs, _ := msg["media"].([]any)
+	group := strings.TrimPrefix(m.ChatID, wnPrefix)
+	var skipped []string
+	for _, r := range refs {
+		ref, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		mt, _ := ref["media_type"].(string)
+		name, _ := ref["file_name"].(string)
+		if mt != "" && !strings.HasPrefix(mt, "image/") {
+			skipped = append(skipped, cmp.Or(name, mt))
+			continue
+		}
+		data, err := w.downloadMedia(ctx, group, ref)
+		if err != nil {
+			w.log.Warn("whitenoise image download failed", "err", err)
+			skipped = append(skipped, cmp.Or(name, "an image")+" (download failed)")
+			continue
+		}
+		m.Images = append(m.Images, media.Image{Name: name, Data: data})
+	}
+	if len(skipped) > 0 {
+		w.Send(ctx, m.ChatID, "I can only read images; skipped: "+strings.Join(skipped, ", "))
+	}
+}
+
+func (w *WhiteNoise) downloadMedia(ctx context.Context, group string, ref map[string]any) ([]byte, error) {
+	resp, err := w.request(ctx, map[string]any{
+		"type": "download_media", "account_id_hex": w.account, "group_id_hex": group, "media": ref,
+	})
+	if err != nil {
+		return nil, err
+	}
+	path, _ := resp["path"].(string)
+	if path == "" {
+		return nil, errors.New("download_media returned no path")
+	}
+	defer os.Remove(path) // wn-agent's decrypted copy; the image now lives in gostafson's store
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > media.MaxBytes {
+		return nil, fmt.Errorf("the image is %d MB; the limit is %d MB", info.Size()>>20, media.MaxBytes>>20)
+	}
+	return os.ReadFile(path)
 }
 
 // Send implements Transport.

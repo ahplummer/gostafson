@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ahplummer/gostafson/internal/media"
 )
 
 // Telegram is a bot transport using the Bot API with long polling.
@@ -24,7 +27,9 @@ import (
 // answered; everyone else is ignored and logged.
 type Telegram struct {
 	api     string // https://api.telegram.org/bot<token>; never logged
+	files   string // https://api.telegram.org/file/bot<token>; never logged
 	token   string
+	menuSet bool
 	allowed []int64
 	http    *http.Client
 	log     *slog.Logger
@@ -38,7 +43,9 @@ type Telegram struct {
 // "https://api.telegram.org"; tests pass a fake server.
 func NewTelegram(apiBase, token string, allowed []int64, log *slog.Logger) *Telegram {
 	return &Telegram{
-		api: strings.TrimRight(apiBase, "/") + "/bot" + token, token: token, allowed: allowed,
+		api:   strings.TrimRight(apiBase, "/") + "/bot" + token,
+		files: strings.TrimRight(apiBase, "/") + "/file/bot" + token,
+		token: token, allowed: allowed,
 		http: &http.Client{Timeout: 70 * time.Second}, log: log,
 		updates: make(chan Message, 32),
 	}
@@ -62,7 +69,18 @@ type tgUpdate struct {
 			ID   int64  `json:"id"`
 			Type string `json:"type"`
 		} `json:"chat"`
-		Text string `json:"text"`
+		Text    string `json:"text"`
+		Caption string `json:"caption"`
+		Photo   []struct {
+			FileID   string `json:"file_id"`
+			FileSize int    `json:"file_size"`
+		} `json:"photo"` // sizes, smallest first
+		Document *struct {
+			FileID   string `json:"file_id"`
+			FileName string `json:"file_name"`
+			MimeType string `json:"mime_type"`
+			FileSize int    `json:"file_size"`
+		} `json:"document"` // an image sent as a file (uncompressed)
 	} `json:"message"`
 	CallbackQuery *struct {
 		ID   string `json:"id"`
@@ -120,6 +138,10 @@ func (t *Telegram) call(ctx context.Context, method string, params, result any) 
 // from an allowed user in a private chat, and routes answers to open
 // questions (typed or button presses) instead of returning them.
 func (t *Telegram) Receive(ctx context.Context) (Message, error) {
+	if !t.menuSet {
+		t.menuSet = true
+		t.setMenu(ctx)
+	}
 	for {
 		select {
 		case m := <-t.updates:
@@ -166,7 +188,7 @@ func (t *Telegram) handleUpdate(ctx context.Context, u tgUpdate) {
 		return
 	}
 	m := u.Message
-	if m == nil || m.From == nil || m.Text == "" {
+	if m == nil || m.From == nil || (m.Text == "" && len(m.Photo) == 0 && m.Document == nil) {
 		return
 	}
 	if !slices.Contains(t.allowed, m.From.ID) || m.Chat.Type != "private" {
@@ -174,10 +196,85 @@ func (t *Telegram) handleUpdate(ctx context.Context, u tgUpdate) {
 		return
 	}
 	chat := tgPrefix + strconv.FormatInt(m.Chat.ID, 10)
-	if t.pending.Deliver(chat, m.Text) {
+	msg := Message{ChatID: chat, Sender: strconv.FormatInt(m.From.ID, 10), Text: m.Text}
+	fileID, name := "", ""
+	switch {
+	case len(m.Photo) > 0:
+		fileID, name = m.Photo[len(m.Photo)-1].FileID, "photo.jpg" // the largest size
+	case m.Document != nil && strings.HasPrefix(m.Document.MimeType, "image/"):
+		fileID, name = m.Document.FileID, m.Document.FileName
+	case m.Document != nil:
+		t.call(ctx, "sendMessage", map[string]any{"chat_id": m.Chat.ID, "text": "I can only read images, not " + cmp.Or(m.Document.MimeType, "this file") + "."}, nil)
 		return
 	}
-	t.updates <- Message{ChatID: chat, Sender: strconv.FormatInt(m.From.ID, 10), Text: m.Text}
+	if fileID != "" {
+		msg.Text = m.Caption
+		data, err := t.download(ctx, fileID)
+		if err != nil {
+			t.log.Warn("telegram image download failed", "err", err)
+			t.call(ctx, "sendMessage", map[string]any{"chat_id": m.Chat.ID, "text": "I couldn't download that image: " + err.Error()}, nil)
+			return
+		}
+		msg.Images = []media.Image{{Name: name, Data: data}}
+	}
+	if len(msg.Images) == 0 && t.pending.Deliver(chat, m.Text) {
+		return
+	}
+	t.updates <- msg
+}
+
+// download fetches a file the bot received. Bots can download files up to
+// 20 MB. The file URL holds the token, so errors never include it.
+func (t *Telegram) download(ctx context.Context, fileID string) ([]byte, error) {
+	var f struct {
+		FilePath string `json:"file_path"`
+		FileSize int    `json:"file_size"`
+	}
+	if err := t.call(ctx, "getFile", map[string]any{"file_id": fileID}, &f); err != nil {
+		return nil, err
+	}
+	if f.FileSize > media.MaxBytes {
+		return nil, fmt.Errorf("the file is %d MB; the limit is %d MB", f.FileSize>>20, media.MaxBytes>>20)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.files+"/"+f.FilePath, nil)
+	if err != nil {
+		return nil, errors.New("bad file path")
+	}
+	resp, err := t.http.Do(req)
+	if err != nil {
+		return nil, errors.New("download failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download: HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, media.MaxBytes+1))
+	if err != nil {
+		return nil, errors.New("download interrupted")
+	}
+	if len(data) > media.MaxBytes {
+		return nil, fmt.Errorf("the file is over %d MB", media.MaxBytes>>20)
+	}
+	return data, nil
+}
+
+// TelegramCommands are the commands in the bot's menu (the button beside the
+// message box), registered with setMyCommands when the bot starts.
+var TelegramCommands = [][2]string{
+	{"help", "commands and tags"},
+	{"profiles", "tags, models and availability"},
+	{"status", "version, this chat's profile, model servers"},
+	{"reset", "clear this chat's history and go back to @default"},
+}
+
+func (t *Telegram) setMenu(ctx context.Context) {
+	var cmds []map[string]string
+	for _, c := range TelegramCommands {
+		cmds = append(cmds, map[string]string{"command": c[0], "description": c[1]})
+	}
+	if err := t.call(ctx, "setMyCommands", map[string]any{"commands": cmds}, nil); err != nil {
+		t.log.Warn("telegram: couldn't set the command menu", "err", err)
+	}
 }
 
 func tgChatID(chatID string) (int64, error) {

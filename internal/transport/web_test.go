@@ -205,3 +205,30 @@ func TestWebStartFailsOnPortInUse(t *testing.T) {
 		t.Fatal("Start on a port in use = nil, want an error")
 	}
 }
+
+// An image posted from the page arrives with the message; the history event
+// records how many images there were, not their data.
+func TestWebImage(t *testing.T) {
+	w, srv, c := webServer(t)
+	login(t, srv, c, "s3cret-token")
+	if code := post(t, c, srv.URL+"/api/send", `{"text":"what is this?","images":[{"name":"shot.png","data":"iVBORw0KGgo="}]}`, true); code != http.StatusNoContent {
+		t.Fatalf("send = %d", code)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	m, err := w.Receive(ctx)
+	if err != nil || len(m.Images) != 1 || m.Images[0].Name != "shot.png" || string(m.Images[0].Data[:4]) != "\x89PNG" {
+		t.Fatalf("receive = %+v, %v", m, err)
+	}
+	last := w.history[len(w.history)-1]
+	if last.Type != "user" || last.Images != 1 {
+		t.Errorf("event = %+v", last)
+	}
+	// An image alone is a message too; bad base64 is refused.
+	if code := post(t, c, srv.URL+"/api/send", `{"images":[{"name":"a.png","data":"iVBORw0KGgo="}]}`, true); code != http.StatusNoContent {
+		t.Errorf("image only = %d", code)
+	}
+	if code := post(t, c, srv.URL+"/api/send", `{"images":[{"name":"a.png","data":"%%%"}]}`, true); code != http.StatusBadRequest {
+		t.Errorf("bad base64 = %d", code)
+	}
+}

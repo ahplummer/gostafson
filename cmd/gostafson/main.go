@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -21,6 +22,7 @@ import (
 	"github.com/ahplummer/gostafson/internal/config"
 	"github.com/ahplummer/gostafson/internal/guard"
 	"github.com/ahplummer/gostafson/internal/loop"
+	"github.com/ahplummer/gostafson/internal/media"
 	"github.com/ahplummer/gostafson/internal/router"
 	"github.com/ahplummer/gostafson/internal/sessions"
 	"github.com/ahplummer/gostafson/internal/transport"
@@ -71,6 +73,11 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 	}
 	defer auditLog.Close()
 
+	images, err := media.OpenStore(filepath.Join(filepath.Dir(cfg.Sessions.Path), "images"))
+	if err != nil {
+		return err
+	}
+
 	clients := make(map[string]*client.Client, len(cfg.Profiles))
 	guards := make(map[string]*guard.Guard, len(cfg.Profiles))
 	for name, p := range cfg.Profiles {
@@ -87,13 +94,18 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 	defer stop()
 
 	sticky := router.NewSticky(rt, func(p string) bool { return cfg.Profiles[p].Sticks() })
-	a := &app{cfg: cfg, router: rt, sticky: sticky, store: store, clients: clients, guards: guards, audit: auditLog,
+	a := &app{cfg: cfg, router: rt, sticky: sticky, images: images, vision: map[string]bool{}, store: store, clients: clients, guards: guards, audit: auditLog,
 		showReasoning: showReasoning, log: logger, workers: map[string]chan transport.Message{}}
 
 	var trs []transport.Transport
 	var cli *transport.CLI
 	if cfg.CLI.On() {
 		cli = transport.NewStdio()
+		words := []string{"/help", "/profiles", "/status", "/reset", "/exit"}
+		for _, t := range rt.Tags() {
+			words = append(words, "@"+t)
+		}
+		cli.Complete = func(string) []string { return words }
 		trs = append(trs, cli)
 	}
 	if cfg.Web.Listen != "" {
@@ -131,6 +143,7 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 		if cfg.Web.Listen != "" {
 			cli.Note("web page: http://" + cfg.Web.Listen)
 		}
+		cli.Note("Tab completes / and @ · ↑ history · Ctrl+V pastes a screenshot · drag in an image file")
 	}
 	return a.serve(ctx, trs)
 }
@@ -139,6 +152,9 @@ type app struct {
 	cfg           *config.Config
 	router        *router.Router
 	sticky        *router.Sticky // per-chat profile from the last sticky tag (PRD D32, D33)
+	images        *media.Store   // each chat's current images (PRD D34)
+	visionMu      sync.Mutex
+	vision        map[string]bool // profile -> takes images, filled on first use
 	store         *sessions.Store
 	clients       map[string]*client.Client
 	guards        map[string]*guard.Guard
@@ -156,11 +172,17 @@ type app struct {
 // Approvals go back over tr, the transport the message came from.
 func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.Message) string {
 	text := strings.TrimSpace(msg.Text)
-	if strings.HasPrefix(text, "/") {
+	if strings.HasPrefix(text, "/") && len(msg.Images) == 0 {
 		return a.command(ctx, msg.ChatID, text)
+	}
+	if len(msg.Images) > 0 && text == "" {
+		text = imagePrompt
 	}
 
 	route, err := a.sticky.Route(msg.ChatID, text)
+	if errors.Is(err, router.ErrEmpty) && route.Tagged && len(msg.Images) > 0 { // "@code" + a photo
+		route.Text, err = imagePrompt, nil
+	}
 	if errors.Is(err, router.ErrEmpty) && route.Tagged { // just a tag: switch the chat
 		p := a.cfg.Profiles[route.Profile]
 		switch {
@@ -183,6 +205,28 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 		return fmt.Sprintf("@%s is unavailable: %s", route.Profile, profile.MissingKey)
 	}
 
+	var ims []media.Image
+	var refs []string
+	if len(msg.Images) > 0 {
+		if len(msg.Images) > media.MaxImages {
+			return fmt.Sprintf("up to %d images per message, please", media.MaxImages)
+		}
+		if !a.canSee(ctx, route.Profile) {
+			return fmt.Sprintf("@%s (%s) can't read images; send it with a tag for a profile that can, such as @%s", route.Profile, profile.Model, a.cfg.DefaultProfile)
+		}
+		for _, raw := range msg.Images {
+			im, err := media.Prepare(ctx, raw.Name, raw.Data)
+			if err != nil {
+				return "can't use that image: " + err.Error()
+			}
+			ims = append(ims, im)
+		}
+		if refs, err = a.images.SetCurrent(msg.ChatID, ims); err != nil {
+			a.log.Error("save images", "chat", msg.ChatID, "err", err)
+			return "error: could not save the image"
+		}
+	}
+
 	history, err := a.store.Recent(ctx, msg.ChatID, a.cfg.Sessions.MaxMessages)
 	if err != nil {
 		a.log.Error("load history", "chat", msg.ChatID, "err", err)
@@ -191,6 +235,7 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	if profile.Remote() {
 		history = sessions.TextOnly(history) // file contents from tools stay on this machine (PRD D21)
 	}
+	history = a.historyImages(ctx, msg.ChatID, route.Profile, history)
 
 	turnCtx, cancel := context.WithTimeout(ctx, a.cfg.Loop.TurnTimeout)
 	defer cancel()
@@ -202,11 +247,13 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	tools := a.guards[route.Profile].ForTurn(msg.ChatID, traceID, spanID, approve.New(asker, a.cfg.Approval.Timeout))
 	start := time.Now()
 	res, err := loop.Run(turnCtx, a.clients[route.Profile], tools, loop.Turn{
-		Profile:  profile,
-		Think:    route.Think,
-		History:  history,
-		Input:    route.Text,
-		MaxSteps: a.cfg.Loop.MaxSteps,
+		Profile:   profile,
+		Think:     route.Think,
+		History:   history,
+		Input:     route.Text,
+		Images:    ims,
+		ImageRefs: refs,
+		MaxSteps:  a.cfg.Loop.MaxSteps,
 	})
 	elapsed := time.Since(start)
 
@@ -222,6 +269,9 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 		Chat: msg.ChatID, Profile: route.Profile, RoutedBy: routedBy, Model: profile.Model, Think: route.Think,
 		Steps: res.Steps, PromptTokens: res.Usage.PromptTokens, CompletionTokens: res.Usage.CompletionTokens,
 		DurationMS: elapsed.Milliseconds(),
+	}
+	for _, im := range ims {
+		rec.Images = append(rec.Images, audit.Image{Name: im.Name, MediaType: im.MediaType, Bytes: len(im.Data), SHA256: im.SHA256()})
 	}
 	if err != nil {
 		rec.Error = err.Error()
@@ -258,4 +308,54 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 		fmt.Fprintf(&b, "\n[%s | %s | %.1fs | %d tok]", route.Profile, profile.Model, elapsed.Seconds(), res.Usage.TotalTokens)
 	}
 	return b.String()
+}
+
+// imagePrompt stands in for the text of a message that is only an image.
+const imagePrompt = "What is in this image?"
+
+// canSee reports whether a profile's model takes images, asking its server
+// once. When the server can't say, the answer is yes: the model's own error
+// is clearer than refusing an image it might read.
+func (a *app) canSee(ctx context.Context, profile string) bool {
+	a.visionMu.Lock()
+	ok, known := a.vision[profile]
+	a.visionMu.Unlock()
+	if known {
+		return ok
+	}
+	ok, err := a.clients[profile].Vision(ctx, a.cfg.Profiles[profile].Model)
+	if err != nil {
+		a.log.Info("vision check failed; assuming images work", "profile", profile, "err", err)
+		return true
+	}
+	a.visionMu.Lock()
+	a.vision[profile] = ok
+	a.visionMu.Unlock()
+	return ok
+}
+
+// historyImages re-attaches the chat's current image to the message that
+// sent it, so follow-ups ("what color is the car?") can still see it. Older
+// images, and every image for a remote profile, become a short note: an
+// image reaches a cloud model only with the message it was sent with (PRD D34).
+func (a *app) historyImages(ctx context.Context, chat, profile string, history []client.Message) []client.Message {
+	remote := a.cfg.Profiles[profile].Remote()
+	see := !remote && a.canSee(ctx, profile)
+	for i, m := range history {
+		if len(m.ImageRefs) == 0 {
+			continue
+		}
+		if see {
+			if ims := a.images.Current(chat, m.ImageRefs); len(ims) > 0 {
+				history[i].Images = ims
+				continue
+			}
+		}
+		note := "[an earlier image; it isn't attached any more]"
+		if remote {
+			note = "[an image was shared here on the local machine; it isn't sent to this model]"
+		}
+		history[i].Content = strings.TrimSpace(m.Content + "\n" + note)
+	}
+	return history
 }

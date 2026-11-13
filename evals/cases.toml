@@ -203,3 +203,19 @@ fixture = "site"
 turns = ["@code What is the page title in index.html?", "@default What is 2 plus 2? Just the number.", "And 3 plus 3? Just the number."]
 want_profiles = ["code", "default", "default"]
 reply_all = ["6"]
+
+# images (PRD D34)
+
+[[case]]
+name = "image-color"
+profile = "default"
+images = ["images/red-square.png"]
+input = "What color is this image? One word."
+reply_all = ["red"]
+
+[[case]]
+name = "image-followup"
+images = ["images/red-square.png"]
+turns = ["What color is this? One word.", "And what shape is it? One word."]
+want_profiles = ["default", "default"]
+reply_all = ["square"]

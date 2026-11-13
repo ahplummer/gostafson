@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ahplummer/gostafson/internal/media"
 )
 
 // Message is one chat message in OpenAI wire format.
@@ -21,6 +23,35 @@ type Message struct {
 	Content    string     `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+
+	// Images go with a user message as image_url content parts. They are
+	// never stored; ImageRefs names them in the media store, so history
+	// records which images a message had (PRD D34).
+	Images    []media.Image `json:"-"`
+	ImageRefs []string      `json:"image_refs,omitempty"`
+}
+
+// MarshalJSON writes the wire form: content is a string, or a list of text
+// and image_url parts when the message has images. ImageRefs is left out.
+func (m Message) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		Role       string     `json:"role"`
+		Content    any        `json:"content"`
+		ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+		ToolCallID string     `json:"tool_call_id,omitempty"`
+	}
+	w := wire{Role: m.Role, Content: m.Content, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
+	if len(m.Images) > 0 {
+		parts := []map[string]any{}
+		if m.Content != "" {
+			parts = append(parts, map[string]any{"type": "text", "text": m.Content})
+		}
+		for _, im := range m.Images {
+			parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": im.DataURL()}})
+		}
+		w.Content = parts
+	}
+	return json.Marshal(w)
 }
 
 // ToolCall is a model's request to run a tool.

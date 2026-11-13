@@ -24,10 +24,11 @@ const (
 // fakeAgent is a minimal wn-agent: account_list, subscribe_inbound (then
 // events pushed by the test), and send_final (recorded).
 type fakeAgent struct {
-	path   string
-	mu     sync.Mutex
-	sent   []map[string]any
-	events chan map[string]any
+	path     string
+	mediaDir string
+	mu       sync.Mutex
+	sent     []map[string]any
+	events   chan map[string]any
 }
 
 func newFakeAgent(t *testing.T) *fakeAgent {
@@ -36,7 +37,7 @@ func newFakeAgent(t *testing.T) *fakeAgent {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	f := &fakeAgent{path: filepath.Join(dir, "s.sock"), events: make(chan map[string]any, 16)}
+	f := &fakeAgent{path: filepath.Join(dir, "s.sock"), mediaDir: dir, events: make(chan map[string]any, 16)}
 	ln, err := net.Listen("unix", f.path)
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +78,11 @@ func (f *fakeAgent) serve(c net.Conn) {
 		f.sent = append(f.sent, req)
 		f.mu.Unlock()
 		reply(map[string]any{"type": "final_sent"})
+	case "download_media":
+		ref, _ := req["media"].(map[string]any)
+		path := filepath.Join(f.mediaDir, "dl-"+ref["file_name"].(string))
+		os.WriteFile(path, []byte("\x89PNG image bytes"), 0o600)
+		reply(map[string]any{"type": "media_downloaded", "path": path, "media_type": "image/png", "file_name": ref["file_name"]})
 	case "subscribe_inbound":
 		reply(map[string]any{"type": "ack"})
 		for ev := range f.events {
@@ -259,5 +265,31 @@ func TestCreatedAt(t *testing.T) {
 		if got != tc.want || field != tc.field {
 			t.Errorf("createdAt(%v) = %d %q, want %d %q", tc.ev, got, field, tc.want, tc.field)
 		}
+	}
+}
+
+// An image attachment is downloaded through wn-agent and its copy deleted; a
+// non-image attachment gets a reply; a photo without text is still a message.
+func TestWhiteNoiseImage(t *testing.T) {
+	f := newFakeAgent(t)
+	w := newTestWN(t, f)
+	w.account = agentID
+	ev := inbound(owner, "")
+	ev["message"].(map[string]any)["media"] = []any{
+		map[string]any{"file_name": "notes.pdf", "media_type": "application/pdf"},
+		map[string]any{"file_name": "cat.png", "media_type": "image/png"},
+	}
+	f.events <- ev
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	m, err := w.Receive(ctx)
+	if err != nil || len(m.Images) != 1 || m.Images[0].Name != "cat.png" || !strings.HasPrefix(string(m.Images[0].Data), "\x89PNG") {
+		t.Fatalf("receive = %+v, %v", m, err)
+	}
+	if _, err := os.Stat(filepath.Join(f.mediaDir, "dl-cat.png")); err == nil {
+		t.Error("wn-agent's copy not deleted")
+	}
+	if got := f.sentTexts(); len(got) != 1 || !strings.Contains(got[0], "skipped: notes.pdf") {
+		t.Errorf("sent = %q", got)
 	}
 }

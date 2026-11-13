@@ -59,7 +59,7 @@ func (s *Store) Append(ctx context.Context, chatID string, msgs ...client.Messag
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, m := range msgs {
-		b, err := json.Marshal(m)
+		b, err := json.Marshal(stored(m))
 		if err != nil {
 			return err
 		}
@@ -88,11 +88,11 @@ func (s *Store) Recent(ctx context.Context, chatID string, limit int) ([]client.
 		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
-		var m client.Message
+		var m storedMessage
 		if err := json.Unmarshal([]byte(raw), &m); err != nil {
 			return nil, err
 		}
-		msgs = append(msgs, m)
+		msgs = append(msgs, client.Message(m))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -106,6 +106,16 @@ func (s *Store) Recent(ctx context.Context, chatID string, limit int) ([]client.
 		msgs = msgs[1:]
 	}
 	return msgs, nil
+}
+
+// storedMessage is a message as saved: the wire fields plus image refs (the
+// image data itself is never stored here). Its plain JSON encoding skips the
+// wire form's MarshalJSON.
+type storedMessage client.Message
+
+func stored(m client.Message) storedMessage {
+	m.Images = nil
+	return storedMessage(m)
 }
 
 // Count returns the number of stored messages for a chat.

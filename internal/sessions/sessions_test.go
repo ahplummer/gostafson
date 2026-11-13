@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ahplummer/gostafson/internal/client"
+	"github.com/ahplummer/gostafson/internal/media"
 )
 
 func open(t *testing.T) (*Store, string) {
@@ -148,5 +149,29 @@ func TestTextOnly(t *testing.T) {
 	}
 	if in[3].ToolCalls == nil || in[3].Content != "Checking." {
 		t.Error("TextOnly modified its input")
+	}
+}
+
+// Image data never reaches the database; the refs do.
+func TestImagesStoredAsRefs(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	m := client.Message{Role: "user", Content: "look", ImageRefs: []string{"abc.png"},
+		Images: []media.Image{{MediaType: "image/png", Data: []byte("PIXELS")}}}
+	if err := s.Append(ctx, "c", m); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	s.db.QueryRow(`SELECT message FROM messages`).Scan(&raw)
+	if strings.Contains(raw, "PIXELS") || strings.Contains(raw, "UElYRUxT") || !strings.Contains(raw, "abc.png") {
+		t.Errorf("stored %s", raw)
+	}
+	got, _ := s.Recent(ctx, "c", 10)
+	if len(got) != 1 || len(got[0].ImageRefs) != 1 || got[0].Images != nil {
+		t.Errorf("recent = %+v", got)
 	}
 }

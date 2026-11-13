@@ -10,6 +10,7 @@ import (
 
 	"github.com/ahplummer/gostafson/internal/client"
 	"github.com/ahplummer/gostafson/internal/config"
+	"github.com/ahplummer/gostafson/internal/media"
 )
 
 // Chatter sends one chat request. *client.Client implements it.
@@ -25,11 +26,13 @@ type Tools interface {
 
 // Turn is the input to one run of the loop.
 type Turn struct {
-	Profile  *config.Profile
-	Think    bool
-	History  []client.Message // earlier messages in this chat, oldest first
-	Input    string           // the user's message
-	MaxSteps int
+	Profile   *config.Profile
+	Think     bool
+	History   []client.Message // earlier messages in this chat, oldest first
+	Input     string           // the user's message
+	Images    []media.Image    // images sent with it
+	ImageRefs []string         // their names in the media store, saved in history
+	MaxSteps  int
 }
 
 // Result is the outcome of one turn.
@@ -49,7 +52,7 @@ func Run(ctx context.Context, c Chatter, tools Tools, t Turn) (Result, error) {
 	if t.MaxSteps <= 0 {
 		t.MaxSteps = 1
 	}
-	user := client.Message{Role: "user", Content: t.Input}
+	user := client.Message{Role: "user", Content: t.Input, Images: t.Images, ImageRefs: t.ImageRefs}
 	res := Result{New: []client.Message{user}}
 
 	msgs := make([]client.Message, 0, len(t.History)+2)

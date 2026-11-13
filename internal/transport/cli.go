@@ -3,12 +3,15 @@ package transport
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ahplummer/gostafson/internal/lineedit"
 )
 
 // CLI reads one message per line from an input stream and writes replies to
@@ -19,8 +22,12 @@ type CLI struct {
 	ChatID string
 	Prompt string
 	Color  bool
-	out    io.Writer
-	lines  chan lineOrErr
+	// Complete returns "/" command and "@" tag candidates for the line
+	// editor's hints; main sets it.
+	Complete func(word string) []string
+	out      io.Writer
+	lines    chan lineOrErr
+	ed       *lineedit.Editor // set when stdin and stdout are a terminal
 
 	mu   sync.Mutex // guards out and the spinner
 	spin *spinner
@@ -39,14 +46,43 @@ func NewCLI(in io.Reader, out io.Writer) *CLI {
 }
 
 // NewStdio returns a CLI transport on stdin and stdout, with color when
-// stdout is a terminal.
+// stdout is a terminal. When stdin is a terminal too it uses the line
+// editor: history, Tab completion, multi-line paste and Ctrl+V images.
 func NewStdio() *CLI {
-	c := NewCLI(os.Stdin, os.Stdout)
-	if isTerminal(os.Stdout) {
-		c.Color = true
-		c.Prompt = accent + bold + "❯ " + reset
+	in, _ := os.Stdin.Stat()
+	if !isTerminal(os.Stdout) || in.Mode()&os.ModeCharDevice == 0 {
+		return NewCLI(os.Stdin, os.Stdout)
+	}
+	c := &CLI{ChatID: "cli", Prompt: accent + bold + "❯ " + reset, Color: true, out: os.Stdout}
+	keys := make(chan []byte, 16)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := os.Stdin.Read(buf)
+			if n > 0 {
+				keys <- append([]byte(nil), buf[:n]...)
+			}
+			if err != nil {
+				close(keys)
+				return
+			}
+		}
+	}()
+	c.ed = &lineedit.Editor{
+		In: keys, Out: os.Stdout, Lock: &c.mu,
+		Raw:       func() (func(), error) { return lineedit.MakeRaw(os.Stdin.Fd()) },
+		Width:     func() int { return lineedit.Width(os.Stdout.Fd()) },
+		Clipboard: lineedit.Clipboard,
+		Complete:  func(w string) []string { return c.complete(w) },
 	}
 	return c
+}
+
+func (c *CLI) complete(w string) []string {
+	if c.Complete == nil {
+		return nil
+	}
+	return c.Complete(w)
 }
 
 func (c *CLI) read(in io.Reader) {
@@ -84,6 +120,9 @@ func (c *CLI) Note(s string) {
 
 // Receive prints the prompt and waits for the next non-empty line.
 func (c *CLI) Receive(ctx context.Context) (Message, error) {
+	if c.ed != nil {
+		return c.receiveEdited(ctx)
+	}
 	for {
 		c.write(c.Prompt)
 		select {
@@ -106,6 +145,27 @@ func (c *CLI) Receive(ctx context.Context) (Message, error) {
 			}
 			return Message{ChatID: c.ChatID, Sender: "local", Text: l.line}, nil
 		}
+	}
+}
+
+func (c *CLI) receiveEdited(ctx context.Context) (Message, error) {
+	for {
+		l, err := c.ed.ReadLine(ctx, c.Prompt, lineedit.Options{History: true, Complete: true})
+		if errors.Is(err, lineedit.ErrInterrupt) {
+			return Message{}, io.EOF
+		}
+		if err != nil {
+			return Message{}, err
+		}
+		switch strings.TrimSpace(l.Text) {
+		case "":
+			if len(l.Images) == 0 {
+				continue
+			}
+		case "/exit", "/quit":
+			return Message{}, io.EOF
+		}
+		return Message{ChatID: c.ChatID, Sender: "local", Text: l.Text, Images: l.Images}, nil
 	}
 }
 
@@ -144,6 +204,24 @@ func (c *CLI) Busy(_ string) (done func()) {
 func (c *CLI) Ask(ctx context.Context, _ string, question string) (string, error) {
 	c.mu.Lock()
 	wasSpinning := c.stopSpinLocked()
+	if c.ed != nil {
+		c.mu.Unlock()
+		defer func() {
+			if wasSpinning {
+				c.mu.Lock()
+				c.startSpinLocked()
+				c.mu.Unlock()
+			}
+		}()
+		l, err := c.ed.ReadLine(ctx, yellow+bold+"? "+question+reset+" ", lineedit.Options{})
+		if err != nil {
+			if ctx.Err() != nil {
+				c.write("(no answer: treated as no)\n")
+			}
+			return "", err
+		}
+		return l.Text, nil
+	}
 	if c.Color {
 		fmt.Fprintf(c.out, "%s? %s%s ", yellow+bold, question, reset)
 	} else {

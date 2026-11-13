@@ -20,8 +20,11 @@
   <div class="q"></div>
   <div class="buttons"><button id="yes">Yes</button><button id="no">No</button></div>
 </div>
+<div id="attachments" hidden></div>
 <form id="compose" autocomplete="off">
-  <textarea id="text" rows="1" placeholder="Message · @code to edit files · /help" enterkeyhint="send"></textarea>
+  <button type="button" id="attach" aria-label="Attach an image" title="Attach an image (or paste, or drop one here)">＋</button>
+  <input type="file" id="file" accept="image/*" multiple hidden>
+  <textarea id="text" rows="1" placeholder="Message · @code to edit files · paste or drop images · /help" enterkeyhint="send"></textarea>
   <button type="submit" aria-label="Send">➤</button>
 </form>
 <script src="/app.js"></script>

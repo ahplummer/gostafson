@@ -20,6 +20,9 @@ func (a *app) command(ctx context.Context, chatID, text string) string {
 			return "error: " + err.Error()
 		}
 		a.sticky.Reset(chatID)
+		if err := a.images.Reset(chatID); err != nil {
+			return "error: " + err.Error()
+		}
 		return fmt.Sprintf("history cleared; back on @%s", a.cfg.DefaultProfile)
 	case "/profiles":
 		return a.profiles()

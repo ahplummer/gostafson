@@ -36,7 +36,16 @@ type Turn struct {
 	PromptTokens     int       `json:"prompt_tokens"`
 	CompletionTokens int       `json:"completion_tokens"`
 	DurationMS       int64     `json:"duration_ms"`
+	Images           []Image   `json:"images,omitempty"` // images sent with the message: never the data
 	Error            string    `json:"error,omitempty"`
+}
+
+// Image describes one image in a turn record.
+type Image struct {
+	Name      string `json:"name"`
+	MediaType string `json:"media_type"`
+	Bytes     int    `json:"bytes"`
+	SHA256    string `json:"sha256"`
 }
 
 // ToolCall is the record for one tool call, allowed or denied.

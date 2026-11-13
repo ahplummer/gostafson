@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/ahplummer/gostafson/internal/media"
 )
 
 //go:embed webpage
@@ -49,9 +52,10 @@ type Web struct {
 }
 
 type webEvent struct {
-	Type string    `json:"type"` // user | reply | busy | idle | ask | answered
-	Text string    `json:"text,omitempty"`
-	Time time.Time `json:"time"`
+	Type   string    `json:"type"` // user | reply | busy | idle | ask | answered
+	Text   string    `json:"text,omitempty"`
+	Images int       `json:"images,omitempty"` // images sent with a user message (the data isn't kept)
+	Time   time.Time `json:"time"`
 }
 
 const maxHistory = 200
@@ -154,7 +158,7 @@ func (w *Web) Handler() http.Handler {
 func securityHeaders(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		hd := rw.Header()
-		hd.Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		hd.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		hd.Set("X-Content-Type-Options", "nosniff")
 		hd.Set("Referrer-Policy", "no-referrer")
 		hd.Set("Cache-Control", "no-store")
@@ -251,23 +255,40 @@ func (w *Web) events(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Web) send(rw http.ResponseWriter, r *http.Request) {
-	var body struct{ Text string }
-	if err := json.NewDecoder(http.MaxBytesReader(rw, r.Body, 64<<10)).Decode(&body); err != nil {
-		http.Error(rw, "bad request", http.StatusBadRequest)
+	var body struct {
+		Text   string
+		Images []struct {
+			Name string
+			Data string // base64, without the data: prefix
+		}
+	}
+	// The page scales images down before sending; this limit allows a few
+	// at full size anyway.
+	if err := json.NewDecoder(http.MaxBytesReader(rw, r.Body, 48<<20)).Decode(&body); err != nil {
+		http.Error(rw, "bad request (too large?)", http.StatusBadRequest)
 		return
 	}
 	text := strings.TrimSpace(body.Text)
-	if text == "" {
+	var ims []media.Image
+	for _, im := range body.Images {
+		data, err := base64.StdEncoding.DecodeString(im.Data)
+		if err != nil {
+			http.Error(rw, "bad image data", http.StatusBadRequest)
+			return
+		}
+		ims = append(ims, media.Image{Name: im.Name, Data: data})
+	}
+	if text == "" && len(ims) == 0 {
 		rw.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if w.pending.Deliver(WebChat, text) { // an answer: Ask publishes it with the question
+	if len(ims) == 0 && w.pending.Deliver(WebChat, text) { // an answer: Ask publishes it with the question
 		rw.WriteHeader(http.StatusNoContent)
 		return
 	}
-	w.publish(webEvent{Type: "user", Text: text})
+	w.publish(webEvent{Type: "user", Text: text, Images: len(ims)})
 	select {
-	case w.in <- Message{ChatID: WebChat, Sender: "web", Text: text}:
+	case w.in <- Message{ChatID: WebChat, Sender: "web", Text: text, Images: ims}:
 		rw.WriteHeader(http.StatusNoContent)
 	default:
 		http.Error(rw, "too many messages waiting", http.StatusTooManyRequests)
