@@ -74,13 +74,14 @@ base_url = "http://localhost:11434/v1"
 model = "gostafson-qwen3.5-9b"   # until the M5 evals pick a coding model
 think_toggle = true
 temperature = 0.2
-tools = ["list_dir", "read_file", "write_file", "search_files"]
+tools = ["list_dir", "read_file", "write_file", "search_files", "run"]
 root = "var/work/code"   # host: "/Users/agent/work/napps"
 system_prompt = """
 You are a web developer working on small static and Nostr web apps.
 Prefer plain HTML, CSS and JavaScript.
 You have file tools for one working directory. Paths are relative to it; "." is the top.
 Look at files before changing them. When you write a file, write its complete contents.
+The run tool runs a few listed commands (no shell): use it to count lines, search, check JavaScript syntax, or use git.
 Don't repeat a file's contents in your reply unless asked; say what you found or changed."""
 
 # Cloud profiles. Only used when a message is tagged; default_profile must be local.

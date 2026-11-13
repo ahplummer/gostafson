@@ -14,7 +14,7 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 - M2 (file tools, guard with `os.Root`, JSONL audit log): done.
 - M3 (cloud profile rules, OpenRouter data-collection preference, approval gate on the CLI): done; `@claude` and `@cloud` checked live.
 - M4 (transports, `setup.sh`, LaunchDaemon, first deploy): done. Deployed on the host as LaunchDaemons running as `agent`; CLI colors, web page, Telegram and White Noise tested live. `make rollback` and a reboot tested.
-- M5 (command tool and evals): in progress. Eval harness done (`make eval`); `qwen3.5:9b` stays the model for now. Next: the `run` tool.
+- M5 (command tool and evals): in progress. Eval harness done (`make eval`); `qwen3.5:9b` stays the model for now. `run` tool built (PRD D31); not yet deployed.
 
 ## Rules
 
@@ -23,7 +23,7 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 - **Dependencies.** Standard library first. Allowed: `modernc.org/sqlite`, `github.com/BurntSushi/toml`, and later one messenger client. Ask before adding anything else. No agent frameworks; no `openai-go` (PRD D12).
 - **Security invariants** (tests must cover them; a failing guard test blocks deploy):
   - All file access from tools goes through `os.Root`.
-  - No shell: commands run as argv from an allowlist, never `sh -c`.
+  - No shell: commands run as argv from the fixed list in `internal/tools/run.go`, never `sh -c`, each under `sandbox-exec`; unlisted commands are refused, not offered for approval (PRD D31).
   - Cloud profiles get no file tools by default and text-only history; nothing routes to a cloud profile without an explicit tag or approval; `default_profile` must be local.
   - Subagents and the decision model can only narrow permissions.
 - Keep each `internal/` package small enough to read in one sitting.
@@ -37,7 +37,7 @@ internal/config/     TOML config; API keys from env vars (dev) or a 0600 secrets
 internal/client/     OpenAI-compatible chat completions client (net/http)
 internal/router/     @tag and think=true parsing
 internal/loop/       agent loop: model call, tools, step limit
-internal/tools/      file tools (list_dir, read_file, write_file, search_files) on an *os.Root
+internal/tools/      file tools (list_dir, read_file, write_file, search_files) on an *os.Root; run.go: command list, argument checks, sandbox
 internal/guard/      default deny, path checks, one os.Root per profile, audit record per call
 internal/audit/      JSONL audit log, trace and span IDs
 internal/approve/    yes/no approval gate with timeout

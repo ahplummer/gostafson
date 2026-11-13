@@ -142,7 +142,7 @@ func check(cs Case, r Result, root string, before map[string][]byte) []string {
 	failf := func(format string, a ...any) { fails = append(fails, fmt.Sprintf(format, a...)) }
 	called := map[string]bool{}
 	for _, c := range r.Calls {
-		called[strings.Fields(c)[0]] = true
+		called[strings.TrimSuffix(strings.Fields(c)[0], ":")] = true // "run: ls -la" counts as run
 	}
 	for _, t := range cs.WantTools {
 		if !called[t] {
@@ -226,10 +226,16 @@ func (t *recorder) Definitions() []client.Tool { return t.inner.Definitions() }
 
 func (t *recorder) Call(ctx context.Context, name, args string) (string, error) {
 	var a struct {
-		Path string `json:"path"`
+		Path    string   `json:"path"`
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
 	}
 	json.Unmarshal([]byte(args), &a)
-	t.r.Calls = append(t.r.Calls, strings.TrimSpace(name+" "+a.Path))
+	desc := name + " " + a.Path
+	if name == "run" {
+		desc = "run: " + strings.Join(append([]string{a.Command}, a.Args...), " ")
+	}
+	t.r.Calls = append(t.r.Calls, strings.TrimSpace(desc))
 	asked := len(t.ap.asked)
 	out, err := t.inner.Call(ctx, name, args)
 	if err != nil && len(t.ap.asked) == asked {

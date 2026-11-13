@@ -187,6 +187,14 @@ func (t *Turn) run(ctx context.Context, name, arguments string, rec *audit.ToolC
 		}
 	}
 
+	if tool.Check != nil {
+		if err := tool.Check(t.g.root, args); err != nil {
+			rec.Guard = "deny"
+			rec.Reason = "arguments not allowed"
+			return "", err
+		}
+	}
+
 	if tool.Confirm != nil {
 		if q := tool.Confirm(t.g.root, args); q != "" {
 			result := approve.Unavailable

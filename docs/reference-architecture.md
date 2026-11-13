@@ -112,7 +112,7 @@ flowchart TD
 | Subagents | `delegate(profile, task)` tool that calls the loop again | Keeps the parent's context small | Section 7 |
 | Session store | SQLite via `modernc.org/sqlite` (no cgo, keeps the binary static), one row per message, keyed by chat ID | Survives restarts; easy to inspect | Keep last N turns in context; `/reset` command clears |
 | Tools (v1) | `list_dir`, `read_file`, `write_file`, `search_files`, `fetch_url` (GET only, optional) | Enough for web dev on napps | No shell tool in v1 |
-| Tools (v2) | `run` with an argv allowlist (`npm`, `npx`, `node`, `git status/diff`, `python -m http.server`) | Build and preview without a general shell | `exec.CommandContext(ctx, argv[0], argv[1:]...)` with `Dir` inside the jail; never `sh -c`; anything not on the list goes to the approval gate |
+| Tools | `run` with a fixed command list (PRD D31): read-only `ls`, `tree`, `wc`, `head`, `tail`, `diff`, `grep`, `rg`, `find`, `file`, `du`, `jq`, `node --check`, `mkdir`, `git status/diff/log/show`; `rm`, `mv`, `cp`, `git init/add/commit` ask first | Inspect, check and version a project without a general shell | `exec.CommandContext` under `sandbox-exec` (no network, writes only in the root, nothing readable under `/Users` but the root), argv only, per-command flag lists, fixed program paths, scrubbed environment, 30 s limit, process group killed |
 | Path jail | Each root opened as an `os.Root`; all file tools go through it, so `..` and symlinks can't escape | Directory confinement at the app level, without hand-written path checks or check-then-open races | Roots per profile: `code` gets `~agent/work/napps`, `default` gets `~agent/work/notes` |
 | OS-level confinement | Run as a separate macOS user `agent` with its own home; no sudo; your home not readable | If the guard has a bug, the OS still blocks access to your files | The local equivalent of a per-agent identity. `sandbox-exec` profile as an extra layer (deprecated by Apple, still works) |
 | Cloud data rule | Remote profiles get no file tools by default and text-only history (tool calls and results dropped); OpenRouter requests send `provider.data_collection: "deny"`; `default_profile` must be local | Local file contents never leave the host unless you paste them in or tag a cloud profile after a reply that quoted them | `allow_remote_file_tools = true` per profile to override; `zdr = true` in `provider` for zero data retention. PRD D21 |
@@ -284,7 +284,7 @@ A longer comparison with the GCP architecture, including where each enforces its
 | Egress control | Agent Gateway | Mostly open | Cloud profiles get no file tools; `fetch_url` optional |
 | Content safety | Model Armor | None by default | None in v1 (local models; cloud is opt-in) |
 | Human-in-the-loop | ADK tool confirmation | Command approval prompts | Approval gate |
-| Execution sandbox | Managed runtime | Terminal backends (local, Docker, SSH, ...) | Path jail + argv allowlist + OS user |
+| Execution sandbox | Managed runtime | Terminal backends (local, Docker, SSH, ...) | Path jail + argv allowlist + `sandbox-exec` + OS user |
 | Audit | Cloud Trace / Logging | Session logs | JSONL audit log |
 | Budget | Billing budget alerts | Provider-side | OpenRouter credit limit; local is free |
 | Memory across chats | Memory Bank | Memory files, skills | Out of scope for v1 |
@@ -406,7 +406,7 @@ To rotate: change the key in Bitwarden, `bwset` again, `make push-secrets`, rest
 **Step 2.** File tools, path jail, audit log. `@code` editing a napp in `~agent/work/napps`.
 **Step 3.** OpenRouter profiles with the no-file-tools rule and provider data settings. Approval gate on the CLI.
 **Step 4.** Pick a messenger and write its adapter. Approval gate over the messenger. `setup.sh` and LaunchDaemon install; first `make deploy`.
-**Step 5.** `run` tool with argv allowlist. Golden-set evals per profile; compare `qwen3-coder:30b` vs `qwen2.5-coder:14b` on tool-call reliability and speed.
+**Step 5.** `run` tool with argv allowlist under `sandbox-exec` (done, D31). Golden-set evals per profile (done: `make eval`; `qwen3.5:9b` 42/42, `qwen3:8b` 39/42 but 2.5 times faster).
 **Step 6.** Decision model behind `decide()` for untagged messages. Label 50–100 real messages from the audit log, compare against "no tag means default", and set the threshold.
 **Step 7.** `delegate()` tool, depth 1, policy-narrowing check with tests.
 

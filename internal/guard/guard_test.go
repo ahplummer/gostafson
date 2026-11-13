@@ -284,3 +284,45 @@ func TestApprovalInAudit(t *testing.T) {
 		t.Errorf("record = guard %q reason %q approval %q", r.Guard, r.Reason, r.Approval)
 	}
 }
+
+// run through the guard: a refused command is logged as a denial and never
+// starts; a read-only command runs without asking; one that changes files
+// asks first and doesn't run on a no; a symlink can't take a command outside.
+func TestRunThroughGuard(t *testing.T) {
+	g, outside, logPath := fixture(t, "run")
+	ap := &fakeApprover{result: approve.Denied}
+	turn := g.ForTurn("c", "t", "s", ap)
+	ctx := context.Background()
+
+	if _, err := turn.Call(ctx, "run", `{"command":"sh","args":["-c","id"]}`); err == nil {
+		t.Error("sh: allowed")
+	}
+	if out, err := turn.Call(ctx, "run", `{"command":"head","args":["link-file"]}`); err == nil || strings.Contains(out, secret) {
+		t.Errorf("head link-file = %q, %v", out, err)
+	}
+	if out, err := turn.Call(ctx, "run", `{"command":"wc","args":["-c","a.txt"]}`); err != nil || !strings.Contains(out, "11 a.txt") {
+		t.Errorf("wc = %q, %v", out, err)
+	}
+	if _, err := turn.Call(ctx, "run", `{"command":"rm","args":["a.txt"]}`); err == nil {
+		t.Error("rm without approval: ran")
+	}
+	if len(ap.asked) != 1 || ap.asked[0] != "run: rm a.txt?" {
+		t.Errorf("asked %q", ap.asked)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(outside), "root", "a.txt")); err != nil {
+		t.Error("a.txt removed despite the no")
+	}
+
+	b, _ := os.ReadFile(logPath)
+	recs := strings.Split(strings.TrimSpace(string(b)), "\n")
+	var reasons []string
+	for _, l := range recs {
+		var r audit.ToolCall
+		must(t, json.Unmarshal([]byte(l), &r))
+		reasons = append(reasons, r.Guard+":"+r.Reason)
+	}
+	want := "deny:arguments not allowed,deny:arguments not allowed,allow:,deny:not approved"
+	if got := strings.Join(reasons, ","); got != want {
+		t.Errorf("audit = %s, want %s", got, want)
+	}
+}

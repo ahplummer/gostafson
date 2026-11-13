@@ -40,6 +40,9 @@ type Tool struct {
 	// Confirm, if set, returns a question to ask the owner before Run, or ""
 	// when this call needs no approval.
 	Confirm func(root *os.Root, args json.RawMessage) string
+	// Check, if set, validates the arguments before anything else; an error
+	// refuses the call (logged as denied, not as a failed run).
+	Check func(root *os.Root, args json.RawMessage) error
 }
 
 // All returns every tool by name.
@@ -49,6 +52,7 @@ func All() map[string]Tool {
 		"read_file":    {Def: def("read_file", "Read a text file.", pathSchema), Run: readFile},
 		"write_file":   {Def: def("write_file", "Create or overwrite a text file. Parent directories are created.", writeSchema), Run: writeFile, Confirm: confirmOverwrite},
 		"search_files": {Def: def("search_files", "Find lines containing a string (case-insensitive) in text files under a directory.", searchSchema), Run: searchFiles},
+		"run":          RunTool(),
 	}
 }
 
@@ -204,6 +208,9 @@ func writeFile(_ context.Context, root *os.Root, raw json.RawMessage) (string, e
 	}
 	if p == "." {
 		return "", errors.New("path is required")
+	}
+	if InGitDir(p) {
+		return "", fmt.Errorf("%s: files inside .git are off limits", p)
 	}
 	if len(a.Content) > MaxWrite {
 		return "", fmt.Errorf("content is %d bytes; limit is %d", len(a.Content), MaxWrite)
