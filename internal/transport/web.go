@@ -39,7 +39,7 @@ const cookieName = "gostafson"
 type Web struct {
 	// Conversations and History, set by main, serve the sidebar and the
 	// current conversation's messages (PRD D38).
-	Conversations func(ctx context.Context) ([]ConversationInfo, error)
+	Conversations func(ctx context.Context) (Sidebar, error)
 	History       func(ctx context.Context) ([]HistoryMessage, error)
 
 	addr    string
@@ -161,7 +161,7 @@ func (w *Web) Handler() http.Handler {
 	mux.HandleFunc("GET /api/chats", w.requireAuth(func(rw http.ResponseWriter, r *http.Request) {
 		w.serveJSON(rw, r, func(ctx context.Context) (any, error) {
 			if w.Conversations == nil {
-				return []ConversationInfo{}, nil
+				return Sidebar{Chats: []ConversationInfo{}}, nil
 			}
 			return w.Conversations(ctx)
 		})
@@ -395,10 +395,18 @@ func names(files []media.Image) []string {
 	return out
 }
 
+// Sidebar is what the page's sidebar shows: saved conversations and the
+// project of the current one, which the page can filter on (PRD D42).
+type Sidebar struct {
+	Project string             `json:"project,omitempty"`
+	Chats   []ConversationInfo `json:"chats"`
+}
+
 // ConversationInfo is one saved conversation in the page's sidebar.
 type ConversationInfo struct {
 	ID       string `json:"id"`
 	Label    string `json:"label"` // "[travato] Van oil"
+	Project  string `json:"project,omitempty"`
 	When     string `json:"when"`
 	Profile  string `json:"profile,omitempty"`
 	Messages int    `json:"messages"`

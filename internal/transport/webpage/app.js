@@ -110,10 +110,35 @@ document.getElementById("menu").addEventListener("click", () => document.body.cl
 document.getElementById("scrim").addEventListener("click", closeSide);
 document.getElementById("newchat").addEventListener("click", () => { reloadAfter = true; send("/new"); closeSide(); });
 
+// In a project, the sidebar shows that project's conversations unless "all"
+// is picked (PRD D42); the choice is kept per browser.
+let showAll = false;
+try { showAll = localStorage.getItem("chats-all") === "1"; } catch {}
+const filterEl = document.getElementById("filter");
+const fproj = document.getElementById("fproj"), fall = document.getElementById("fall");
+function setShowAll(v) {
+  showAll = v;
+  try { localStorage.setItem("chats-all", v ? "1" : "0"); } catch {}
+  loadChats();
+}
+fproj.addEventListener("click", () => setShowAll(false));
+fall.addEventListener("click", () => setShowAll(true));
+
 async function loadChats() {
-  let list;
-  try { const r = await fetch("/api/chats"); if (!r.ok) return; list = await r.json(); } catch { return; }
+  let data;
+  try { const r = await fetch("/api/chats"); if (!r.ok) return; data = await r.json(); } catch { return; }
+  const project = data.project || "";
+  filterEl.hidden = !project;
+  fproj.textContent = project;
+  fproj.setAttribute("aria-pressed", String(!showAll));
+  fall.setAttribute("aria-pressed", String(showAll));
+  const list = project && !showAll ? data.chats.filter(c => c.project === project) : data.chats;
   chatsEl.textContent = "";
+  if (list.length === 0 && project && !showAll) {
+    const li = document.createElement("li"); li.className = "empty";
+    li.textContent = "no saved conversations in " + project + " yet";
+    chatsEl.append(li);
+  }
   for (const c of list) {
     const li = document.createElement("li");
     if (c.current) li.className = "current";
@@ -252,7 +277,7 @@ document.getElementById("compose").addEventListener("submit", ev => {
   ev.preventDefault();
   const t = text.value.trim();
   if (!t && !pending.length) return;
-  if (/^\/(chat|new|reset|delete)\b/.test(t)) reloadAfter = true;
+  if (/^\/(chat|new|reset|delete|project)\b/.test(t)) reloadAfter = true; // these can switch the conversation
   const imgs = pending; pending = []; showAttachments();
   text.value = ""; text.style.height = "";
   send(t, imgs);

@@ -232,6 +232,30 @@ func (a *app) conversationCommand(ctx context.Context, chat, text string) string
 	return a.help(chat)
 }
 
+// projectChats lists project's recent conversations, numbered for /chat N.
+func (a *app) projectChats(ctx context.Context, chat, project string) string {
+	list, err := a.store.InProject(ctx, project, 5)
+	if err != nil || len(list) == 0 {
+		return ""
+	}
+	var ids []string
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s's recent conversations:\n", project)
+	for i, c := range list {
+		ids = append(ids, c.ID)
+		t := c.Title
+		if t == "" {
+			t = "(untitled)"
+		}
+		fmt.Fprintf(&b, "%d. %s · %s · %d messages\n", i+1, t, when(c.Updated), c.Messages)
+	}
+	a.projMu.Lock()
+	a.listing[chat] = ids
+	a.projMu.Unlock()
+	b.WriteString("/chat N picks one up")
+	return b.String()
+}
+
 // lastExchange shows where a resumed conversation left off.
 func (a *app) lastExchange(ctx context.Context, id string) string {
 	msgs, _ := a.store.Recent(ctx, id, 6)
@@ -317,18 +341,21 @@ func (a *app) ask(ctx context.Context, prompt string) (string, error) {
 }
 
 // webConversations lists saved conversations for the web page's sidebar.
-func (a *app) webConversations(ctx context.Context) ([]transport.ConversationInfo, error) {
+// The page filters to the current project's conversations itself, so the
+// list is long enough to hold a project's older ones.
+func (a *app) webConversations(ctx context.Context) (transport.Sidebar, error) {
+	out := transport.Sidebar{Chats: []transport.ConversationInfo{}}
 	cur, err := a.store.Current(ctx, transport.WebChat)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	list, err := a.store.List(ctx, "", 50)
+	out.Project = cur.Project
+	list, err := a.store.List(ctx, "", 200)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	out := []transport.ConversationInfo{}
 	for _, c := range list {
-		out = append(out, transport.ConversationInfo{ID: c.ID, Label: label(c), When: when(c.Updated),
+		out.Chats = append(out.Chats, transport.ConversationInfo{ID: c.ID, Label: label(c), Project: c.Project, When: when(c.Updated),
 			Profile: c.Profile, Messages: c.Messages, Current: c.ID == cur.ID})
 	}
 	return out, nil

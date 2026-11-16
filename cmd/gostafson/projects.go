@@ -214,6 +214,9 @@ func (a *app) projectCommand(ctx context.Context, chat, text string) string {
 		}
 		b.WriteString("\n" + switched)
 		b.WriteString("\n/project off to detach")
+		if list := a.projectChats(ctx, chat, p.Name); list != "" {
+			b.WriteString("\n\n" + list)
+		}
 		return b.String()
 	}
 }

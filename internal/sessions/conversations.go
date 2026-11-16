@@ -192,6 +192,12 @@ func (s *Store) List(ctx context.Context, query string, limit int) ([]Conversati
 		strings.Join(terms, " AND "))
 }
 
+// InProject returns the most recently used conversations with messages in
+// project, newest first.
+func (s *Store) InProject(ctx context.Context, project string, limit int) ([]Conversation, error) {
+	return s.query(ctx, `WHERE c.project = ? AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = c.id)`, limit, project)
+}
+
 func (s *Store) query(ctx context.Context, where string, limit int, args ...any) ([]Conversation, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT c.id, c.title, c.origin, c.created_at, c.updated_at, c.profile, c.project, c.summary,
 		c.summarized_through, (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id)

@@ -279,8 +279,8 @@ func TestWebPendingState(t *testing.T) {
 
 func TestWebSidebarAPI(t *testing.T) {
 	w, srv, c := webServer(t)
-	w.Conversations = func(context.Context) ([]ConversationInfo, error) {
-		return []ConversationInfo{{ID: "c-1", Label: "[travato] Van oil", Current: true}}, nil
+	w.Conversations = func(context.Context) (Sidebar, error) {
+		return Sidebar{Project: "travato", Chats: []ConversationInfo{{ID: "c-1", Label: "[travato] Van oil", Project: "travato", Current: true}}}, nil
 	}
 	w.History = func(context.Context) ([]HistoryMessage, error) {
 		return []HistoryMessage{{Role: "user", Text: "what oil?"}, {Role: "assistant", Text: "5W-20"}}, nil
@@ -289,7 +289,7 @@ func TestWebSidebarAPI(t *testing.T) {
 		t.Errorf("chats without login = %d", resp.StatusCode)
 	}
 	login(t, srv, c, "s3cret-token")
-	for path, want := range map[string]string{"/api/chats": `"label":"[travato] Van oil"`, "/api/history": `"text":"5W-20"`} {
+	for path, want := range map[string]string{"/api/chats": `{"project":"travato","chats":[{"id":"c-1","label":"[travato] Van oil","project":"travato"`, "/api/history": `"text":"5W-20"`} {
 		resp, err := c.Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)
