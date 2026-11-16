@@ -214,6 +214,11 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 		a.log.Error("open conversation", "chat", msg.ChatID, "err", err)
 		return "error: could not open the conversation"
 	}
+	if f := strings.Fields(text); len(f) > 1 && (f[0] == "/new" || f[0] == "/reset") { // "/new how often ...": start one, then ask
+		notice := a.command(ctx, msg.ChatID, f[0])
+		msg.Text = strings.TrimSpace(strings.TrimPrefix(text, f[0]))
+		return notice + "\n\n" + a.handle(ctx, tr, msg)
+	}
 	if (text == "/add" || strings.HasPrefix(text, "/add ")) && len(msg.Images)+len(msg.Files) > 0 {
 		return a.addFiles(ctx, tr, msg.ChatID, append(msg.Images, msg.Files...), false)
 	}

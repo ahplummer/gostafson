@@ -128,15 +128,15 @@ func (a *app) conversationCommand(ctx context.Context, chat, text string) string
 		}
 		for i, c := range list {
 			ids = append(ids, c.ID)
-			mark := " "
+			mark := "" // no padding: Telegram trims a reply's leading spaces, so the rows wouldn't line up
 			if c.ID == cur.ID {
-				mark = "*"
+				mark = "* "
 			}
 			extra := ""
 			if c.Profile != "" {
 				extra = " · @" + c.Profile
 			}
-			fmt.Fprintf(&b, "%s%2d. %s · %s%s · %d messages\n", mark, i+1, label(c), when(c.Updated), extra, c.Messages)
+			fmt.Fprintf(&b, "%s%d. %s · %s%s · %d messages\n", mark, i+1, label(c), when(c.Updated), extra, c.Messages)
 		}
 		a.projMu.Lock()
 		a.listing[chat] = ids
