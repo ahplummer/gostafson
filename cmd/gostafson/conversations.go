@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ahplummer/gostafson/internal/client"
+	"github.com/ahplummer/gostafson/internal/projects"
 	"github.com/ahplummer/gostafson/internal/sessions"
 	"github.com/ahplummer/gostafson/internal/transport"
 )
@@ -107,7 +108,7 @@ func when(t time.Time) string {
 	return t.Format("Jan 2 2006")
 }
 
-// conversationCommand handles /new, /reset, /chats, /chat, /title and /delete.
+// conversationCommand handles /new, /reset, /chats, /chat, /title, /delete and /move.
 func (a *app) conversationCommand(ctx context.Context, chat, text string) string {
 	f := strings.Fields(text)
 	rest := strings.TrimSpace(strings.TrimPrefix(text, f[0]))
@@ -228,8 +229,105 @@ func (a *app) conversationCommand(ctx context.Context, chat, text string) string
 		a.images.Reset(c.ID)
 		a.conversationCommand(ctx, chat, "/new")
 		return "deleted " + label(c) + "; this is a new conversation"
+
+	case "/move":
+		return a.move(ctx, chat, f[1:])
 	}
 	return a.help(chat)
+}
+
+// move files a conversation under another project, or none (PRD D42):
+// "/move <project|none> [conversation id] [yes]". Without an id it moves the
+// current conversation and attaches the project to the chat. Search results
+// from the old project's sources are in the history, so moving them along
+// needs "yes".
+func (a *app) move(ctx context.Context, chat string, args []string) string {
+	if len(args) == 0 {
+		return "usage: /move <project> files this conversation under another project; /move none removes its project"
+	}
+	target := strings.ToLower(args[0])
+	if target == "none" || target == "off" {
+		target = ""
+	}
+	cur, err := a.store.Current(ctx, chat)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	c, yes := cur, false
+	for _, w := range args[1:] {
+		switch {
+		case w == "yes":
+			yes = true
+		case strings.HasPrefix(w, "c-"):
+			if c, err = a.store.Get(ctx, w); err != nil {
+				return "no conversation " + w + "; /chats lists them"
+			}
+		}
+	}
+	var p *projects.Project
+	if target != "" {
+		if p, err = a.projects.Open(target); err != nil {
+			return err.Error()
+		}
+	}
+	if c.Project == target {
+		return label(c) + " is already there"
+	}
+	if c.Project != "" && !yes {
+		if n := a.projectToolResults(ctx, c.ID); n > 0 {
+			again := "/move " + args[0]
+			if c.ID != cur.ID {
+				again += " " + c.ID
+			}
+			return fmt.Sprintf("%s has %d search or read results from %s's sources in its history; moving it takes them along. %s yes to move anyway",
+				label(c), n, c.Project, again)
+		}
+	}
+	dest := "no project"
+	if p != nil {
+		dest = p.Name
+	}
+	if c.ID != cur.ID { // another conversation: only its record changes
+		profile := c.Profile
+		if prof, ok := a.cfg.Profiles[profile]; ok && prof.Remote() && !a.cloudOK(p) {
+			profile = ""
+		}
+		if err := a.store.SetState(ctx, c.ID, profile, target); err != nil {
+			return "error: " + err.Error()
+		}
+		return fmt.Sprintf("moved %s to %s", label(c), dest)
+	}
+	note := ""
+	if prof := a.cfg.Profiles[a.sticky.Active(chat)]; prof.Remote() && !a.cloudOK(p) {
+		a.sticky.Set(chat, a.projectProfile(p))
+		note = fmt.Sprintf("; %s is local-only, so this chat moved from @%s to @%s", p.Name, prof.Name, a.sticky.Active(chat))
+	}
+	a.setProject(chat, target) // saves the conversation's project and profile
+	return fmt.Sprintf("moved %s to %s%s", label(c), dest, note)
+}
+
+// cloudOK reports whether cloud profiles may be used with p (nil: no project).
+func (a *app) cloudOK(p *projects.Project) bool {
+	if p == nil {
+		return true
+	}
+	st, _ := p.Settings()
+	return st.Cloud
+}
+
+// projectToolResults counts a conversation's project_search and project_read
+// calls, whose results are stored in its history.
+func (a *app) projectToolResults(ctx context.Context, id string) int {
+	msgs, _ := a.store.Recent(ctx, id, 100000)
+	n := 0
+	for _, m := range msgs {
+		for _, tc := range m.ToolCalls {
+			if tc.Function.Name == "project_search" || tc.Function.Name == "project_read" {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // projectChats lists project's recent conversations, numbered for /chat N.

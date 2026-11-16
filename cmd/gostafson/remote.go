@@ -46,7 +46,7 @@ func remote(args []string) error {
 		return err
 	}
 	cli := transport.NewStdio()
-	words := []string{"/help", "/new", "/chats", "/chat", "/title", "/delete", "/profiles", "/projects", "/project", "/add", "/status", "/reset", "/exit"}
+	words := []string{"/help", "/new", "/chats", "/chat", "/title", "/delete", "/move", "/profiles", "/projects", "/project", "/add", "/status", "/reset", "/exit"}
 	if st, err := r.state(ctx); err == nil {
 		for _, t := range st.Tags {
 			words = append(words, "@"+t)

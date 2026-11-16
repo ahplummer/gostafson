@@ -126,7 +126,7 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 	var cli *transport.CLI
 	if cfg.CLI.On() {
 		cli = transport.NewStdio()
-		words := []string{"/help", "/new", "/chats", "/chat", "/title", "/delete", "/profiles", "/projects", "/project", "/add", "/status", "/reset", "/exit"}
+		words := []string{"/help", "/new", "/chats", "/chat", "/title", "/delete", "/move", "/profiles", "/projects", "/project", "/add", "/status", "/reset", "/exit"}
 		for _, t := range rt.Tags() {
 			words = append(words, "@"+t)
 		}

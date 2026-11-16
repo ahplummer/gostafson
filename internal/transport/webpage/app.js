@@ -166,7 +166,20 @@ async function loadChats() {
     } else label.textContent = c.label;
     const meta = document.createElement("span"); meta.className = "meta";
     meta.textContent = c.when + (c.profile ? " · @" + c.profile : "") + " · " + c.messages + " messages";
-    li.append(label, meta);
+    // ⋯ opens "move to": the other projects and none (/move, PRD D42)
+    const more = document.createElement("button");
+    more.type = "button"; more.className = "more"; more.textContent = "⋯";
+    more.title = "Move to another project"; more.setAttribute("aria-label", "Move " + c.label);
+    const menu = document.createElement("div"); menu.className = "movemenu"; menu.hidden = true;
+    const head = document.createElement("span"); head.textContent = "move to:"; menu.append(head);
+    for (const p of [...(data.projects || []), ""]) {
+      if (p === (c.project || "")) continue;
+      const b = document.createElement("button"); b.type = "button"; b.textContent = p || "no project";
+      b.addEventListener("click", ev => { ev.stopPropagation(); menu.hidden = true; send("/move " + (p || "none") + " " + c.id); });
+      menu.append(b);
+    }
+    more.addEventListener("click", ev => { ev.stopPropagation(); menu.hidden = !menu.hidden; });
+    li.append(more, label, meta, menu);
     li.title = c.label;
     li.addEventListener("click", () => { if (!c.current) { reloadAfter = true; send("/chat " + c.id); } closeSide(); });
     chatsEl.append(li);

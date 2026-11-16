@@ -15,7 +15,7 @@ import (
 // transport, not here, so a remote transport can't stop the process.
 func (a *app) command(ctx context.Context, chatID, text string) string {
 	switch strings.Fields(text)[0] {
-	case "/new", "/reset", "/chats", "/chat", "/title", "/delete":
+	case "/new", "/reset", "/chats", "/chat", "/title", "/delete", "/move":
 		return a.conversationCommand(ctx, chatID, text)
 	case "/profiles":
 		return a.profiles()
@@ -39,6 +39,7 @@ func (a *app) help(chatID string) string {
   /new       start a new conversation in the same project (the current one is saved; /reset does the same)
   /chats     saved conversations; /chats <words> searches them; /chat N picks one up
   /title     rename this conversation; /delete removes it for good
+  /move <project>   file this conversation under another project (/move none: no project)
   /projects  list projects; /project <name> attaches one, /project off detaches
   /project cloud on|off   let cloud profiles use the attached project (off by default)
   /project new <name>   create a project; send files with the caption /add to add sources
