@@ -108,35 +108,51 @@ let reloadAfter = false;
 const closeSide = () => document.body.classList.remove("side-open");
 document.getElementById("menu").addEventListener("click", () => document.body.classList.toggle("side-open"));
 document.getElementById("scrim").addEventListener("click", closeSide);
-document.getElementById("newchat").addEventListener("click", () => { reloadAfter = true; send("/new"); closeSide(); });
+document.getElementById("newchat").addEventListener("click", () => {
+  reloadAfter = true;
+  // in the project being shown: /project starts a new conversation there when
+  // the current one is in another project or has messages
+  send(filter !== "all" && filter !== lastProject ? "/project " + filter : "/new");
+  closeSide();
+});
 
-// In a project, the sidebar shows that project's conversations unless "all"
-// is picked (PRD D42); the choice is kept per browser.
-let showAll = false;
-try { showAll = localStorage.getItem("chats-all") === "1"; } catch {}
+// Filter buttons: "all" and one per project (PRD D42). Picking one only
+// filters the list; entering a project follows it, so the sidebar shows the
+// current project's conversations. ＋ New conversation starts one in the
+// project shown.
+let filter = "all";                // "all" or a project name
+try { filter = localStorage.getItem("chats-filter") || "all"; } catch {}
+let lastProject = null;
 const filterEl = document.getElementById("filter");
-const fproj = document.getElementById("fproj"), fall = document.getElementById("fall");
-function setShowAll(v) {
-  showAll = v;
-  try { localStorage.setItem("chats-all", v ? "1" : "0"); } catch {}
+function setFilter(f) {
+  filter = f;
+  try { localStorage.setItem("chats-filter", f); } catch {}
   loadChats();
 }
-fproj.addEventListener("click", () => setShowAll(false));
-fall.addEventListener("click", () => setShowAll(true));
 
 async function loadChats() {
   let data;
   try { const r = await fetch("/api/chats"); if (!r.ok) return; data = await r.json(); } catch { return; }
   const project = data.project || "";
-  filterEl.hidden = !project;
-  fproj.textContent = project;
-  fproj.setAttribute("aria-pressed", String(!showAll));
-  fall.setAttribute("aria-pressed", String(showAll));
-  const list = project && !showAll ? data.chats.filter(c => c.project === project) : data.chats;
+  if (project && project !== lastProject && (lastProject !== null || filter !== "all"))
+    filter = project;   // entered another project, or the page opened in one: follow it ("all" stays all)
+  lastProject = project;
+  const projects = data.projects || [];
+  if (filter !== "all" && !projects.includes(filter)) filter = "all";   // a project since removed
+  try { localStorage.setItem("chats-filter", filter); } catch {}
+  filterEl.hidden = projects.length === 0;
+  filterEl.textContent = "";
+  for (const f of ["all", ...projects]) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = f;
+    b.setAttribute("aria-pressed", String(f === filter));
+    b.addEventListener("click", () => setFilter(f));
+    filterEl.append(b);
+  }
+  const list = filter === "all" ? data.chats : data.chats.filter(c => c.project === filter);
   chatsEl.textContent = "";
-  if (list.length === 0 && project && !showAll) {
+  if (list.length === 0 && filter !== "all") {
     const li = document.createElement("li"); li.className = "empty";
-    li.textContent = "no saved conversations in " + project + " yet";
+    li.textContent = "no saved conversations in " + filter + " yet";
     chatsEl.append(li);
   }
   for (const c of list) {

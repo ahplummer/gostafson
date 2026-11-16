@@ -161,7 +161,7 @@ func (w *Web) Handler() http.Handler {
 	mux.HandleFunc("GET /api/chats", w.requireAuth(func(rw http.ResponseWriter, r *http.Request) {
 		w.serveJSON(rw, r, func(ctx context.Context) (any, error) {
 			if w.Conversations == nil {
-				return Sidebar{Chats: []ConversationInfo{}}, nil
+				return Sidebar{Projects: []string{}, Chats: []ConversationInfo{}}, nil
 			}
 			return w.Conversations(ctx)
 		})
@@ -398,8 +398,9 @@ func names(files []media.Image) []string {
 // Sidebar is what the page's sidebar shows: saved conversations and the
 // project of the current one, which the page can filter on (PRD D42).
 type Sidebar struct {
-	Project string             `json:"project,omitempty"`
-	Chats   []ConversationInfo `json:"chats"`
+	Project  string             `json:"project,omitempty"`
+	Projects []string           `json:"projects"` // every project, for the filter buttons
+	Chats    []ConversationInfo `json:"chats"`
 }
 
 // ConversationInfo is one saved conversation in the page's sidebar.

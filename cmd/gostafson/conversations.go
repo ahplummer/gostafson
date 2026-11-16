@@ -344,12 +344,15 @@ func (a *app) ask(ctx context.Context, prompt string) (string, error) {
 // The page filters to the current project's conversations itself, so the
 // list is long enough to hold a project's older ones.
 func (a *app) webConversations(ctx context.Context) (transport.Sidebar, error) {
-	out := transport.Sidebar{Chats: []transport.ConversationInfo{}}
+	out := transport.Sidebar{Projects: []string{}, Chats: []transport.ConversationInfo{}}
 	cur, err := a.store.Current(ctx, transport.WebChat)
 	if err != nil {
 		return out, err
 	}
 	out.Project = cur.Project
+	if names, err := a.projects.List(); err == nil && names != nil {
+		out.Projects = names
+	}
 	list, err := a.store.List(ctx, "", 200)
 	if err != nil {
 		return out, err
