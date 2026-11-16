@@ -146,15 +146,37 @@ type Settings struct {
 	// Cloud lets cloud profiles see the project: its instructions, memory and
 	// the read-only search tools. Off by default (PRD D37).
 	Cloud bool `toml:"cloud"`
+	// Profile is the profile the project's chats last used; attaching the
+	// project switches the chat to it. Empty means the default (PRD D42).
+	Profile string `toml:"profile,omitempty"`
 }
 
 // SetCloud turns cloud access on or off in project.toml.
 func (p *Project) SetCloud(on bool) error {
+	p.memMu.Lock()
+	defer p.memMu.Unlock()
 	st, err := p.Settings()
 	if err != nil {
 		return err
 	}
 	st.Cloud = on
+	return p.save(st)
+}
+
+// SetProfile records the profile the project's chats use ("" for the
+// default); it writes project.toml only when that changes.
+func (p *Project) SetProfile(name string) error {
+	p.memMu.Lock()
+	defer p.memMu.Unlock()
+	st, err := p.Settings()
+	if err != nil || st.Profile == name {
+		return err
+	}
+	st.Profile = name
+	return p.save(st)
+}
+
+func (p *Project) save(st Settings) error {
 	var b strings.Builder
 	b.WriteString("# Project settings (PRD D37). cloud = true lets cloud profiles see this project.\n")
 	if err := toml.NewEncoder(&b).Encode(st); err != nil {

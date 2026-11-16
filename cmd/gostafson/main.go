@@ -238,6 +238,15 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	}
 
 	route, err := a.sticky.Route(msg.ChatID, text)
+	if p, local := a.localOnly(msg.ChatID); local && a.cfg.Profiles[a.sticky.Active(msg.ChatID)].Remote() {
+		// A project without cloud access doesn't stay on a cloud profile: an
+		// explicit tag still sends its own message, and the chat stays local (PRD D42).
+		a.sticky.Set(msg.ChatID, a.projectProfile(p))
+		if errors.Is(err, router.ErrEmpty) && route.Tagged && len(msg.Images) == 0 {
+			return fmt.Sprintf("%s is local-only, so this chat stays on @%s. Tag a message @%s to send just that one, or /project cloud on to allow cloud profiles", p.Name, a.sticky.Active(msg.ChatID), route.Profile)
+		}
+		added += fmt.Sprintf("[%s is local-only: @%s answers this message only; the chat stays on @%s]\n", p.Name, route.Profile, a.sticky.Active(msg.ChatID))
+	}
 	a.saveState(ctx, msg.ChatID, conv.ID)                                       // a tag may have changed the sticky profile
 	if errors.Is(err, router.ErrEmpty) && route.Tagged && len(msg.Images) > 0 { // "@code" + a photo
 		route.Text, err = imagePrompt, nil

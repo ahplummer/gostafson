@@ -105,6 +105,18 @@ func TestProjectBasics(t *testing.T) {
 	if st, _ := p.Settings(); st.Cloud {
 		t.Error("cloud off not saved")
 	}
+	if err := p.SetProfile("code"); err != nil {
+		t.Fatal(err)
+	}
+	p.SetCloud(true)
+	if st, _ := p.Settings(); st.Profile != "code" || !st.Cloud {
+		t.Errorf("settings = %+v; want profile code kept when cloud changes", st)
+	}
+	p.SetProfile("")
+	p.SetCloud(false)
+	if b, _ := os.ReadFile(filepath.Join(p.Dir, "project.toml")); strings.Contains(string(b), "profile =") {
+		t.Errorf("default profile written: %s", b)
+	}
 	if _, ok := p.Tools()["remember"]; !ok {
 		t.Error("no remember tool")
 	}

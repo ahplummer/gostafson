@@ -41,6 +41,9 @@ func (a *app) conversation(ctx context.Context, chat string) (sessions.Conversat
 		} else {
 			a.sticky.Set(chat, "") // a profile since removed from the config
 		}
+		if p, local := a.localOnly(chat); local && a.cfg.Profiles[a.sticky.Active(chat)].Remote() {
+			a.sticky.Set(chat, a.projectProfile(p)) // cloud access was turned off since
+		}
 	}
 	return c, nil
 }
@@ -56,6 +59,17 @@ func (a *app) saveState(ctx context.Context, chat, convID string) {
 	a.projMu.Unlock()
 	if err := a.store.SetState(ctx, convID, profile, project); err != nil {
 		a.log.Warn("save conversation state", "err", err)
+	}
+	if project == "" {
+		return
+	}
+	if p, err := a.projects.Open(project); err == nil { // the project's profile follows (PRD D42)
+		st, _ := p.Settings()
+		if prof, ok := a.cfg.Profiles[a.sticky.Active(chat)]; ok && !(prof.Remote() && !st.Cloud) {
+			if err := p.SetProfile(profile); err != nil {
+				a.log.Warn("save project profile", "project", project, "err", err)
+			}
+		}
 	}
 }
 
@@ -109,9 +123,10 @@ func (a *app) conversationCommand(ctx context.Context, chat, text string) string
 		if _, err := a.conversation(ctx, chat); err != nil {
 			return "error: " + err.Error()
 		}
-		a.setProject(chat, project)
-		if project != "" {
-			return fmt.Sprintf("new conversation in %s on @%s; the previous one is saved (/chats lists them, /project off detaches)", project, a.cfg.DefaultProfile)
+		if p, err := a.projects.Open(project); project != "" && err == nil {
+			a.sticky.Set(chat, a.projectProfile(p))
+			a.setProject(chat, project)
+			return fmt.Sprintf("new conversation in %s on @%s; the previous one is saved (/chats lists them, /project off detaches)", project, a.sticky.Active(chat))
 		}
 		return fmt.Sprintf("new conversation on @%s; the previous one is saved (/chats lists them)", a.cfg.DefaultProfile)
 
