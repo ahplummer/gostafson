@@ -41,6 +41,9 @@ type Web struct {
 	// current conversation's messages (PRD D38).
 	Conversations func(ctx context.Context) (Sidebar, error)
 	History       func(ctx context.Context) ([]HistoryMessage, error)
+	// State, set by main, is the chat's profile, project and tags, for
+	// `gostafson remote`'s prompt and completion.
+	State func(ctx context.Context) (State, error)
 
 	addr    string
 	token   string
@@ -164,6 +167,14 @@ func (w *Web) Handler() http.Handler {
 				return Sidebar{Projects: []string{}, Chats: []ConversationInfo{}}, nil
 			}
 			return w.Conversations(ctx)
+		})
+	}))
+	mux.HandleFunc("GET /api/state", w.requireAuth(func(rw http.ResponseWriter, r *http.Request) {
+		w.serveJSON(rw, r, func(ctx context.Context) (any, error) {
+			if w.State == nil {
+				return State{Tags: []string{}}, nil
+			}
+			return w.State(ctx)
 		})
 	}))
 	mux.HandleFunc("GET /api/history", w.requireAuth(func(rw http.ResponseWriter, r *http.Request) {
@@ -393,6 +404,14 @@ func names(files []media.Image) []string {
 		out = append(out, f.Name)
 	}
 	return out
+}
+
+// State is the web chat's sticky profile ("" for the default) and attached
+// project, and the profile tags.
+type State struct {
+	Profile string   `json:"profile,omitempty"`
+	Project string   `json:"project,omitempty"`
+	Tags    []string `json:"tags"`
 }
 
 // Sidebar is what the page's sidebar shows: saved conversations and the

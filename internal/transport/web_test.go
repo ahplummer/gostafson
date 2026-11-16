@@ -282,6 +282,9 @@ func TestWebSidebarAPI(t *testing.T) {
 	w.Conversations = func(context.Context) (Sidebar, error) {
 		return Sidebar{Project: "travato", Projects: []string{"travato", "va"}, Chats: []ConversationInfo{{ID: "c-1", Label: "[travato] Van oil", Project: "travato", Current: true}}}, nil
 	}
+	w.State = func(context.Context) (State, error) {
+		return State{Profile: "sonnet", Project: "travato", Tags: []string{"default", "sonnet"}}, nil
+	}
 	w.History = func(context.Context) ([]HistoryMessage, error) {
 		return []HistoryMessage{{Role: "user", Text: "what oil?"}, {Role: "assistant", Text: "5W-20"}}, nil
 	}
@@ -289,7 +292,8 @@ func TestWebSidebarAPI(t *testing.T) {
 		t.Errorf("chats without login = %d", resp.StatusCode)
 	}
 	login(t, srv, c, "s3cret-token")
-	for path, want := range map[string]string{"/api/chats": `{"project":"travato","projects":["travato","va"],"chats":[{"id":"c-1","label":"[travato] Van oil","project":"travato"`, "/api/history": `"text":"5W-20"`} {
+	for path, want := range map[string]string{"/api/chats": `{"project":"travato","projects":["travato","va"],"chats":[{"id":"c-1","label":"[travato] Van oil","project":"travato"`, "/api/history": `"text":"5W-20"`,
+		"/api/state": `{"profile":"sonnet","project":"travato","tags":["default","sonnet"]}`} {
 		resp, err := c.Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)

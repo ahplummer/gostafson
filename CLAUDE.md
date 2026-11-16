@@ -33,7 +33,7 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 
 ```
 cmd/gostafson-eval/  golden-case runner: pass rate, speed, prompt-cache reuse per model
-cmd/gostafson/       main.go: wiring, flags, turn handling; serve.go: transports and per-chat workers; commands.go: /help /profiles /status /reset
+cmd/gostafson/       main.go: wiring, flags, turn handling; serve.go: transports and per-chat workers; commands.go: /help /profiles /status /reset; remote.go: `gostafson remote`
 internal/config/     TOML config; API keys from env vars (dev) or a 0600 secrets file (host)
 internal/client/     OpenAI-compatible chat completions client (net/http)
 internal/router/     @tag and think=true parsing; Sticky: per-chat profile from the last local tag (PRD D32)
@@ -61,6 +61,7 @@ make models            # create gostafson-qwen3.5-9b (32K context) on the host's
 make eval              # golden cases in evals/ against the host's models (tunnel up); MODELS=a,b EVAL_ARGS="-n 3"
 make test-integration  # unit + integration tests against the host's Ollama (tunnel up)
 make run               # CLI REPL with config.local.toml (tunnel up); ARGS=-v logs a line per turn
+make remote            # the TUI for the host's running service over its web API (GOSTAFSON_WEB_TOKEN, REMOTE_URL in Makefile.local)
 make build             # dist/gostafson for darwin/arm64
 make setup             # run deploy/setup.sh on the host with sudo (agent user, dirs, wn-agent, LaunchDaemons)
 make push-config       # config.host.toml -> /usr/local/etc/gostafson/config.toml (root-owned)

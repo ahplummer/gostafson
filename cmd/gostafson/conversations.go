@@ -390,6 +390,21 @@ func (a *app) webConversations(ctx context.Context) (transport.Sidebar, error) {
 	return out, nil
 }
 
+// webState is the web chat's profile, project and tags, for `gostafson remote`.
+func (a *app) webState(ctx context.Context) (transport.State, error) {
+	if _, err := a.conversation(ctx, transport.WebChat); err != nil {
+		return transport.State{}, err
+	}
+	st := transport.State{Tags: a.router.Tags()}
+	if p := a.sticky.Active(transport.WebChat); p != a.cfg.DefaultProfile {
+		st.Profile = p
+	}
+	if p := a.project(transport.WebChat); p != nil {
+		st.Project = p.Name
+	}
+	return st, nil
+}
+
 // webHistory returns the web page's current conversation for drawing:
 // what the user and the assistant said, not tool calls or results.
 func (a *app) webHistory(ctx context.Context) ([]transport.HistoryMessage, error) {

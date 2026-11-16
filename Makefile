@@ -24,7 +24,7 @@ TUNNEL_LMS_PORT    ?= 1234
 VERSION := $(shell git describe --always --dirty 2>/dev/null || echo dev)
 BIN     := dist/gostafson
 
-.PHONY: build test eval push-project test-integration run tunnel models deploy rollback push-secrets push-config setup versions logs service-log service-status clean check-host
+.PHONY: build test eval push-project test-integration run remote tunnel models deploy rollback push-secrets push-config setup versions logs service-log service-status clean check-host
 
 # Fails fast, before test and build, when DEPLOY_HOST is missing.
 check-host:
@@ -41,6 +41,13 @@ test:
 # Local run with the CLI transport. Pair with `make tunnel` in another terminal.
 run:  # make run ARGS=-v for a log line per turn
 	go run ./cmd/gostafson -config $(CONFIG) $(ARGS)
+
+# The terminal UI for the running service, over its web API on the tailnet:
+# same conversations, projects and approvals as the phone. Needs
+# GOSTAFSON_WEB_TOKEN in this shell and REMOTE_URL in Makefile.local.
+remote:
+	@test -n "$(REMOTE_URL)" || { echo "set REMOTE_URL = http://<host's tailnet IP>:8484 in Makefile.local"; exit 1; }
+	go run ./cmd/gostafson remote -url $(REMOTE_URL)
 
 # Forward the host's Ollama and LM Studio ports to localhost. Change the local
 # ports in Makefile.local if the dev machine runs its own Ollama on 11434.

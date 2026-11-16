@@ -32,6 +32,13 @@ import (
 var version = "dev" // set by -ldflags at build time
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "remote" {
+		if err := remote(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "gostafson remote:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	configPath := flag.String("config", "config.toml", "path to the config file")
 	showReasoning := flag.Bool("show-reasoning", false, "include the model's reasoning in replies when think=true")
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -140,6 +147,7 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 		web := transport.NewWeb(cfg.Web.Listen, cfg.Web.ResolvedToken)
 		web.Conversations = a.webConversations
 		web.History = a.webHistory
+		web.State = a.webState
 		if err := web.Start(ctx, logger); err != nil {
 			return err
 		}
