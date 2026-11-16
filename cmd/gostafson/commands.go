@@ -15,16 +15,8 @@ import (
 // transport, not here, so a remote transport can't stop the process.
 func (a *app) command(ctx context.Context, chatID, text string) string {
 	switch strings.Fields(text)[0] {
-	case "/reset":
-		if err := a.store.Reset(ctx, chatID); err != nil {
-			return "error: " + err.Error()
-		}
-		a.sticky.Reset(chatID)
-		a.setProject(chatID, "")
-		if err := a.images.Reset(chatID); err != nil {
-			return "error: " + err.Error()
-		}
-		return fmt.Sprintf("history cleared; back on @%s, no project", a.cfg.DefaultProfile)
+	case "/new", "/reset", "/chats", "/chat", "/title", "/delete":
+		return a.conversationCommand(ctx, chatID, text)
 	case "/profiles":
 		return a.profiles()
 	case "/projects", "/project":
@@ -44,7 +36,9 @@ func (a *app) help(chatID string) string {
 	return fmt.Sprintf(`commands:
   /profiles  tags, models and availability
   /status    version, history size, model servers
-  /reset     clear this chat's history and go back to @%[3]s, no project
+  /new       start a new conversation (the current one is saved; /reset does the same)
+  /chats     saved conversations; /chats <words> searches them; /chat N picks one up
+  /title     rename this conversation; /delete removes it for good
   /projects  list projects; /project <name> attaches one, /project off detaches
   /project cloud on|off   let cloud profiles use the attached project (off by default)
   /project new <name>   create a project; send files with the caption /add to add sources
@@ -114,10 +108,14 @@ func (a *app) status(ctx context.Context, chatID string) string {
 	if p := a.project(chatID); p != nil {
 		fmt.Fprintf(&b, "project: %s\n", p.Name)
 	}
-	if n, err := a.store.Count(ctx, chatID); err != nil {
-		fmt.Fprintf(&b, "history: error: %v\n", err)
+	if c, err := a.store.Current(ctx, chatID); err != nil {
+		fmt.Fprintf(&b, "conversation: error: %v\n", err)
 	} else {
-		fmt.Fprintf(&b, "history: %d messages stored, last %d sent per turn\n", n, a.cfg.Sessions.MaxMessages)
+		summary := ""
+		if c.Summary != "" {
+			summary = ", older ones summarized"
+		}
+		fmt.Fprintf(&b, "conversation: %s, %d messages (last %d sent per turn%s)\n", label(c), c.Messages, a.cfg.Sessions.MaxMessages, summary)
 	}
 
 	// One check per base URL; use any profile's client for it (same URL, and

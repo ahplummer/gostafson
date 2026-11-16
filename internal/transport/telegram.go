@@ -263,11 +263,13 @@ func (t *Telegram) download(ctx context.Context, fileID string) ([]byte, error) 
 // TelegramCommands are the commands in the bot's menu (the button beside the
 // message box), registered with setMyCommands when the bot starts.
 var TelegramCommands = [][2]string{
+	{"new", "start a new conversation (the current one is saved)"},
+	{"chats", "saved conversations; /chat N picks one up"},
 	{"help", "commands and tags"},
 	{"profiles", "tags, models and availability"},
 	{"status", "version, this chat's profile, model servers"},
 	{"projects", "list projects; /project <name> attaches one"},
-	{"reset", "clear this chat's history and go back to @default"},
+	{"title", "rename this conversation"},
 }
 
 func (t *Telegram) setMenu(ctx context.Context) {

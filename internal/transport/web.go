@@ -37,6 +37,11 @@ const cookieName = "gostafson"
 // restart doesn't log the phone out and the token itself is never stored in
 // the browser.
 type Web struct {
+	// Conversations and History, set by main, serve the sidebar and the
+	// current conversation's messages (PRD D38).
+	Conversations func(ctx context.Context) ([]ConversationInfo, error)
+	History       func(ctx context.Context) ([]HistoryMessage, error)
+
 	addr    string
 	token   string
 	session string // expected cookie value
@@ -153,6 +158,22 @@ func (w *Web) Handler() http.Handler {
 	mux.Handle("GET /app.css", files)
 	mux.HandleFunc("GET /api/events", w.requireAuth(w.events))
 	mux.HandleFunc("POST /api/send", w.requireAuth(w.send))
+	mux.HandleFunc("GET /api/chats", w.requireAuth(func(rw http.ResponseWriter, r *http.Request) {
+		w.serveJSON(rw, r, func(ctx context.Context) (any, error) {
+			if w.Conversations == nil {
+				return []ConversationInfo{}, nil
+			}
+			return w.Conversations(ctx)
+		})
+	}))
+	mux.HandleFunc("GET /api/history", w.requireAuth(func(rw http.ResponseWriter, r *http.Request) {
+		w.serveJSON(rw, r, func(ctx context.Context) (any, error) {
+			if w.History == nil {
+				return []HistoryMessage{}, nil
+			}
+			return w.History(ctx)
+		})
+	}))
 	return securityHeaders(mux)
 }
 
@@ -213,7 +234,7 @@ func (w *Web) events(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "text/event-stream")
 	ch := make(chan webEvent, 64)
 	w.mu.Lock()
-	backlog := append([]webEvent(nil), w.history...)
+	backlog := pendingState(w.history)
 	w.subs[ch] = struct{}{}
 	w.mu.Unlock()
 	defer func() {
@@ -370,6 +391,62 @@ func names(files []media.Image) []string {
 	var out []string
 	for _, f := range files {
 		out = append(out, f.Name)
+	}
+	return out
+}
+
+// ConversationInfo is one saved conversation in the page's sidebar.
+type ConversationInfo struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"` // "[travato] Van oil"
+	When     string `json:"when"`
+	Profile  string `json:"profile,omitempty"`
+	Messages int    `json:"messages"`
+	Current  bool   `json:"current"`
+}
+
+// HistoryMessage is one message of the current conversation, for drawing
+// the page.
+type HistoryMessage struct {
+	Role   string `json:"role"` // user | assistant
+	Text   string `json:"text"`
+	Images int    `json:"images,omitempty"`
+}
+
+func (w *Web) serveJSON(rw http.ResponseWriter, r *http.Request, get func(context.Context) (any, error)) {
+	v, err := get(r.Context())
+	if err != nil {
+		http.Error(rw, "error", http.StatusInternalServerError)
+		return
+	}
+	rw.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(rw).Encode(v)
+}
+
+// pendingState is what a page that connects needs from the event history:
+// an approval question still open, and whether a turn is running. The
+// messages themselves come from the saved conversation (/api/history), so
+// they are drawn once, from one place (PRD D38).
+func pendingState(events []webEvent) []webEvent {
+	var out []webEvent
+	var ask, busy *webEvent
+	for i := range events {
+		switch e := &events[i]; e.Type {
+		case "ask":
+			ask = e
+		case "answered":
+			ask = nil
+		case "busy":
+			busy = e
+		case "idle":
+			busy = nil
+		}
+	}
+	if busy != nil {
+		out = append(out, *busy)
+	}
+	if ask != nil {
+		out = append(out, *ask)
 	}
 	return out
 }

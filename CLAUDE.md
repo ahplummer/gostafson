@@ -14,7 +14,7 @@ A small, local-first agent harness in Go for one Apple Silicon Mac: local models
 - M2 (file tools, guard with `os.Root`, JSONL audit log): done.
 - M3 (cloud profile rules, OpenRouter data-collection preference, approval gate on the CLI): done; `@claude` (now `@sonnet`) and `@cloud` checked live. Cloud profiles: cloud, sonnet, opus, fable, kimi, luna.
 - M4 (transports, `setup.sh`, LaunchDaemon, first deploy): done. Deployed on the host as LaunchDaemons running as `agent`; CLI colors, web page, Telegram and White Noise tested live. `make rollback` and a reboot tested.
-- M5 (command tool and evals): in progress. Eval harness done (`make eval`); `qwen3.5:9b` stays the model for now. `run` tool built (PRD D31), deployed and tested from the phone (tree, git init/add/commit with approvals, npm refused). Images on every transport (D34), the CLI line editor (D35), reply labels (D36): deployed. Projects (D37): built, not yet deployed.
+- M5 (command tool and evals): done. Eval harness done (`make eval`); `qwen3.5:9b` stays the model for now. `run` tool built (PRD D31), deployed and tested from the phone (tree, git init/add/commit with approvals, npm refused). Images on every transport (D34), the CLI line editor (D35), reply labels (D36): deployed. Projects (D37): deployed. Saved conversations (D38): built, not yet deployed.
 
 ## Rules
 
@@ -41,7 +41,7 @@ internal/tools/      file tools (list_dir, read_file, write_file, search_files) 
 internal/guard/      default deny, path checks, one os.Root per profile, audit record per call
 internal/audit/      JSONL audit log, trace and span IDs
 internal/approve/    yes/no approval gate with timeout
-internal/sessions/   SQLite history per chat
+internal/sessions/   SQLite: saved conversations (titles, summaries, search) and their history (PRD D38)
 internal/media/      image checks, scaling with sips, each chat's current image (PRD D34)
 internal/projects/   project dirs, PDF/text/OCR extraction, hybrid search index, project tools (PRD D37)
 internal/lineedit/   CLI line editor: raw mode, history, Tab completion, Ctrl+V images (PRD D35)

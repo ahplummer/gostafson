@@ -125,7 +125,7 @@ func TestWebMessagesAndApproval(t *testing.T) {
 	done()
 	w.Send(ctx, WebChat, "hi there\n[code | m | 1.0s | 3 tok]")
 
-	// A page that connects now gets the history replayed.
+	// A page that connects now.
 	resp, err := c.Get(srv.URL + "/api/events")
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +147,9 @@ func TestWebMessagesAndApproval(t *testing.T) {
 			break
 		}
 	}
-	if got := strings.Join(types, ","); got != "user,ask,answered,busy,idle,reply,ready" {
+	// Messages come from the saved conversation (/api/history); a page that
+	// connects gets only what is still pending: nothing, here.
+	if got := strings.Join(types, ","); got != "ready" {
 		t.Errorf("events = %s", got)
 	}
 }
@@ -248,5 +250,52 @@ func TestWebDocument(t *testing.T) {
 	}
 	if last := w.history[len(w.history)-1]; len(last.Files) != 1 || last.Files[0] != "manual.pdf" {
 		t.Errorf("event = %+v", last)
+	}
+}
+
+func TestWebPendingState(t *testing.T) {
+	ev := func(ts ...string) []webEvent {
+		var out []webEvent
+		for _, t := range ts {
+			out = append(out, webEvent{Type: t})
+		}
+		return out
+	}
+	for in, want := range map[string]string{
+		"user busy ask":               "busy,ask", // a question is open while the turn runs
+		"user busy ask answered":      "busy",
+		"user busy ask answered idle": "",
+		"busy idle busy":              "busy",
+	} {
+		var got []string
+		for _, e := range pendingState(ev(strings.Fields(in)...)) {
+			got = append(got, e.Type)
+		}
+		if strings.Join(got, ",") != want {
+			t.Errorf("%s -> %v, want %s", in, got, want)
+		}
+	}
+}
+
+func TestWebSidebarAPI(t *testing.T) {
+	w, srv, c := webServer(t)
+	w.Conversations = func(context.Context) ([]ConversationInfo, error) {
+		return []ConversationInfo{{ID: "c-1", Label: "[travato] Van oil", Current: true}}, nil
+	}
+	w.History = func(context.Context) ([]HistoryMessage, error) {
+		return []HistoryMessage{{Role: "user", Text: "what oil?"}, {Role: "assistant", Text: "5W-20"}}, nil
+	}
+	if resp, _ := c.Get(srv.URL + "/api/chats"); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("chats without login = %d", resp.StatusCode)
+	}
+	login(t, srv, c, "s3cret-token")
+	for path, want := range map[string]string{"/api/chats": `"label":"[travato] Van oil"`, "/api/history": `"text":"5W-20"`} {
+		resp, err := c.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body := readAll(resp); !strings.Contains(body, want) {
+			t.Errorf("%s = %s", path, body)
+		}
 	}
 }

@@ -78,7 +78,11 @@ function handle(e) {
   switch (e.type) {
     case "ready": conn.textContent = "connected"; conn.className = "ok"; break;
     case "user": addUser(e); break;
-    case "reply": add("reply", render(e.text), true); break;
+    case "reply":
+      add("reply", render(e.text), true);
+      if (reloadAfter) { reloadAfter = false; const note = e.text; loadHistory().then(() => add("note", note)); }
+      loadChats();
+      break;
     case "busy": busy = true; if (!asking) startSpin(); break;
     case "idle": busy = false; stopSpin(); break;
     case "ask":
@@ -96,8 +100,52 @@ function handle(e) {
 }
 
 let source = null;
+// Saved conversations (PRD D38): the sidebar lists them; the page draws the
+// current one from the saved history, and again after /chat, /new or
+// /delete switches it.
+const chatsEl = document.getElementById("chats");
+let reloadAfter = false;
+const closeSide = () => document.body.classList.remove("side-open");
+document.getElementById("menu").addEventListener("click", () => document.body.classList.toggle("side-open"));
+document.getElementById("scrim").addEventListener("click", closeSide);
+document.getElementById("newchat").addEventListener("click", () => { reloadAfter = true; send("/new"); closeSide(); });
+
+async function loadChats() {
+  let list;
+  try { const r = await fetch("/api/chats"); if (!r.ok) return; list = await r.json(); } catch { return; }
+  chatsEl.textContent = "";
+  for (const c of list) {
+    const li = document.createElement("li");
+    if (c.current) li.className = "current";
+    const label = document.createElement("span"); label.className = "label";
+    const m = /^\[([^\]]+)\] (.*)$/.exec(c.label);    // "[travato] Van oil": the project stands out
+    if (m) {
+      const p = document.createElement("span"); p.className = "proj"; p.textContent = "[" + m[1] + "] ";
+      label.append(p, document.createTextNode(m[2]));
+    } else label.textContent = c.label;
+    const meta = document.createElement("span"); meta.className = "meta";
+    meta.textContent = c.when + (c.profile ? " · @" + c.profile : "") + " · " + c.messages + " messages";
+    li.append(label, meta);
+    li.title = c.label;
+    li.addEventListener("click", () => { if (!c.current) { reloadAfter = true; send("/chat " + c.id); } closeSide(); });
+    chatsEl.append(li);
+  }
+}
+
+async function loadHistory() {
+  let msgs;
+  try { const r = await fetch("/api/history"); if (!r.ok) return; msgs = await r.json(); } catch { return; }
+  log.textContent = "";
+  for (const m of msgs) {
+    if (m.role === "user") addUser({ text: m.text, images: m.images });
+    else add("reply", render(m.text), true);
+  }
+}
+
 function connect() {
-  log.textContent = "";            // the server replays recent history on connect
+  log.textContent = "";
+  loadHistory();
+  loadChats();
   source = new EventSource("/api/events");
   source.onmessage = m => handle(JSON.parse(m.data));
   source.onerror = () => {
@@ -204,6 +252,7 @@ document.getElementById("compose").addEventListener("submit", ev => {
   ev.preventDefault();
   const t = text.value.trim();
   if (!t && !pending.length) return;
+  if (/^\/(chat|new|reset|delete)\b/.test(t)) reloadAfter = true;
   const imgs = pending; pending = []; showAttachments();
   text.value = ""; text.style.height = "";
   send(t, imgs);

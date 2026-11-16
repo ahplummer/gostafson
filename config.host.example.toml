@@ -46,7 +46,7 @@ turn_timeout = "300s"      # includes time waiting for approvals
 # embed_model = "nomic-embed-text"  # on the default profile's Ollama; "none" = keyword search only
 
 [profiles.default]
-base_url = "http://localhost:11434/v1"
+base_url = "http://127.0.0.1:11434/v1"
 model = "gostafson-qwen3.5-9b"
 think_toggle = true
 system_prompt = """
@@ -54,7 +54,7 @@ You are a concise assistant running on a local model. Answer directly.
 If you don't know something, say so."""
 
 [profiles.code]
-base_url = "http://localhost:11434/v1"
+base_url = "http://127.0.0.1:11434/v1"
 model = "gostafson-qwen3.5-9b"
 think_toggle = true
 temperature = 0.2

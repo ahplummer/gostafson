@@ -225,7 +225,7 @@ func TestTelegramPhoto(t *testing.T) {
 	if m, err = tg.Receive(ctx); err != nil || len(m.Images) != 1 || m.Text != "what is this?" {
 		t.Fatalf("second message = %+v, %v", m, err)
 	}
-	for _, want := range []string{`setMyCommands {"commands":[{"command":"help"`, `getFile {"file_id":"large"}`, `getFile {"file_id":"d"}`} {
+	for _, want := range []string{`setMyCommands {"commands":[{"command":"new"`, `getFile {"file_id":"large"}`, `getFile {"file_id":"d"}`} {
 		if !strings.Contains(calls, want) {
 			t.Errorf("calls lack %s:\n%s", want, calls)
 		}

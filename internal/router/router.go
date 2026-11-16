@@ -164,6 +164,18 @@ func (s *Sticky) Active(chat string) string {
 	return s.r.def
 }
 
+// Set makes profile chat's sticky profile ("" or the default clears it),
+// as when a saved conversation is resumed.
+func (s *Sticky) Set(chat, profile string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if profile == "" || profile == s.r.def {
+		delete(s.active, chat)
+	} else {
+		s.active[chat] = profile
+	}
+}
+
 // Reset sends chat back to the default profile.
 func (s *Sticky) Reset(chat string) {
 	s.mu.Lock()

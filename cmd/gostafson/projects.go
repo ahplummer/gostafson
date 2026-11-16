@@ -61,11 +61,15 @@ func (a *app) project(chat string) *projects.Project {
 
 func (a *app) setProject(chat, name string) {
 	a.projMu.Lock()
-	defer a.projMu.Unlock()
 	if name == "" {
 		delete(a.attached, chat)
 	} else {
 		a.attached[chat] = name
+	}
+	conv := a.loaded[chat]
+	a.projMu.Unlock()
+	if conv != "" { // saved with the conversation (PRD D38)
+		a.saveState(context.Background(), chat, conv)
 	}
 }
 

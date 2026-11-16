@@ -112,14 +112,14 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 	}
 	a := &app{cfg: cfg, router: rt, sticky: sticky, images: images, vision: map[string]bool{}, models: models, store: store, clients: clients, guards: guards, audit: auditLog,
 		showReasoning: showReasoning, log: logger, workers: map[string]chan transport.Message{},
-		projects: projectStore, attached: map[string]string{}}
+		projects: projectStore, attached: map[string]string{}, loaded: map[string]string{}, listing: map[string][]string{}}
 	extractor.Describe = a.describeImage
 
 	var trs []transport.Transport
 	var cli *transport.CLI
 	if cfg.CLI.On() {
 		cli = transport.NewStdio()
-		words := []string{"/help", "/profiles", "/projects", "/project", "/add", "/status", "/reset", "/exit"}
+		words := []string{"/help", "/new", "/chats", "/chat", "/title", "/delete", "/profiles", "/projects", "/project", "/add", "/status", "/reset", "/exit"}
 		for _, t := range rt.Tags() {
 			words = append(words, "@"+t)
 		}
@@ -138,6 +138,8 @@ func run(configPath string, showReasoning bool, logger *slog.Logger) error {
 	}
 	if cfg.Web.Listen != "" {
 		web := transport.NewWeb(cfg.Web.Listen, cfg.Web.ResolvedToken)
+		web.Conversations = a.webConversations
+		web.History = a.webHistory
 		if err := web.Start(ctx, logger); err != nil {
 			return err
 		}
@@ -184,7 +186,10 @@ type app struct {
 	models        map[string]string // profile -> model, for labeling replies (PRD D36)
 	projects      *projects.Store
 	projMu        sync.Mutex
-	attached      map[string]string // chat -> attached project (PRD D37)
+	attached      map[string]string   // chat -> attached project (PRD D37)
+	loaded        map[string]string   // chat -> conversation whose profile and project are in sticky/attached (PRD D38)
+	listing       map[string][]string // chat -> conversation ids of its last /chats, for /chat N
+	bgMu          sync.Mutex          // one background title or summary at a time
 	visionMu      sync.Mutex
 	vision        map[string]bool // profile -> takes images, filled on first use
 	store         *sessions.Store
@@ -204,6 +209,11 @@ type app struct {
 // Approvals go back over tr, the transport the message came from.
 func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.Message) string {
 	text := strings.TrimSpace(msg.Text)
+	conv, err := a.conversation(ctx, msg.ChatID)
+	if err != nil {
+		a.log.Error("open conversation", "chat", msg.ChatID, "err", err)
+		return "error: could not open the conversation"
+	}
 	if (text == "/add" || strings.HasPrefix(text, "/add ")) && len(msg.Images)+len(msg.Files) > 0 {
 		return a.addFiles(ctx, tr, msg.ChatID, append(msg.Images, msg.Files...), false)
 	}
@@ -223,6 +233,7 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	}
 
 	route, err := a.sticky.Route(msg.ChatID, text)
+	a.saveState(ctx, msg.ChatID, conv.ID)                                       // a tag may have changed the sticky profile
 	if errors.Is(err, router.ErrEmpty) && route.Tagged && len(msg.Images) > 0 { // "@code" + a photo
 		route.Text, err = imagePrompt, nil
 	}
@@ -264,13 +275,13 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 			}
 			ims = append(ims, im)
 		}
-		if refs, err = a.images.SetCurrent(msg.ChatID, ims); err != nil {
+		if refs, err = a.images.SetCurrent(conv.ID, ims); err != nil {
 			a.log.Error("save images", "chat", msg.ChatID, "err", err)
 			return "error: could not save the image"
 		}
 	}
 
-	history, err := a.store.Recent(ctx, msg.ChatID, a.cfg.Sessions.MaxMessages)
+	history, err := a.store.Context(ctx, conv, a.cfg.Sessions.MaxMessages)
 	if err != nil {
 		a.log.Error("load history", "chat", msg.ChatID, "err", err)
 		return "error: could not load history"
@@ -278,7 +289,7 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 	if profile.Remote() {
 		history = sessions.TextOnly(history) // file contents from tools stay on this machine (PRD D21)
 	}
-	history = a.historyImages(ctx, msg.ChatID, route.Profile, history)
+	history = a.historyImages(ctx, conv.ID, route.Profile, history)
 	history = sessions.LabelOthers(history, route.Profile, a.models)
 
 	// The attached project: its context in the system prompt, its tools for
@@ -298,6 +309,13 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 			pp.SystemPrompt = strings.TrimSpace(pp.SystemPrompt + "\n\n" + p.Context(ctx, true) + p.Passages(ctx, route.Text))
 			runProfile = &pp
 		}
+	}
+
+	if conv.Summary != "" { // what fell out of the recent window (PRD D38)
+		pp := *runProfile
+		pp.SystemPrompt = strings.TrimSpace(pp.SystemPrompt + "\n\n## Earlier in this conversation\n" +
+			"(a summary of older messages; the recent ones follow)\n" + conv.Summary)
+		runProfile = &pp
 	}
 
 	turnCtx, cancel := context.WithTimeout(ctx, a.cfg.Loop.TurnTimeout)
@@ -357,9 +375,10 @@ func (a *app) handle(ctx context.Context, tr transport.Transport, msg transport.
 		}
 		return "error: " + err.Error()
 	}
-	if err := a.store.Append(ctx, msg.ChatID, res.New...); err != nil {
+	if err := a.store.Append(ctx, conv.ID, res.New...); err != nil {
 		a.log.Error("save history", "chat", msg.ChatID, "err", err)
 	}
+	go a.afterTurn(conv.ID) // title and summary, in the background
 
 	var b strings.Builder
 	b.WriteString(added)

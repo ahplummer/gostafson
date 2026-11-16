@@ -1,4 +1,6 @@
-// Package sessions stores conversation history per chat in SQLite.
+// Package sessions stores conversations and their history in SQLite. The
+// chat ID that history functions take is a conversation ID (PRD D38); a
+// transport chat's current conversation comes from Current.
 package sessions
 
 import (
@@ -45,7 +47,12 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("sessions schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	s := &Store{db: db}
+	if err := s.migrate(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("sessions: conversations: %w", err)
+	}
+	return s, nil
 }
 
 // Close closes the database.
@@ -68,6 +75,14 @@ func (s *Store) Append(ctx context.Context, chatID string, msgs ...client.Messag
 			`INSERT INTO messages (chat_id, created_at, message) VALUES (?, ?, ?)`, chatID, now, string(b)); err != nil {
 			return err
 		}
+		if t := searchText(string(b)); t != "" {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO messages_fts (text, conversation_id) VALUES (?, ?)`, t, chatID); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE conversations SET updated_at = ? WHERE id = ?`, now, chatID); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -89,11 +104,11 @@ func (s *Store) Recent(ctx context.Context, chatID string, limit int) ([]client.
 		if err := rows.Scan(&raw); err != nil {
 			return nil, err
 		}
-		var m storedMessage
-		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		var m client.Message
+		if err := unmarshalStored(raw, &m); err != nil {
 			return nil, err
 		}
-		msgs = append(msgs, client.Message(m))
+		msgs = append(msgs, m)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -119,6 +134,34 @@ func stored(m client.Message) storedMessage {
 	return storedMessage(m)
 }
 
+func unmarshalStored(raw string, m *client.Message) error {
+	var sm storedMessage
+	if err := json.Unmarshal([]byte(raw), &sm); err != nil {
+		return err
+	}
+	*m = client.Message(sm)
+	return nil
+}
+
+// clientMessage is client.Message, named for conversations.go.
+type clientMessage = client.Message
+
+// MessageWithID is a stored message with its row id.
+type MessageWithID struct {
+	ID      int64
+	Message client.Message
+}
+
+// searchText is what the conversation search indexes for a stored message:
+// what the user and the assistant said, not tool calls or results.
+func searchText(raw string) string {
+	var m client.Message
+	if unmarshalStored(raw, &m) != nil || (m.Role != "user" && m.Role != "assistant") {
+		return ""
+	}
+	return strings.TrimSpace(m.Content)
+}
+
 // Count returns the number of stored messages for a chat.
 func (s *Store) Count(ctx context.Context, chatID string) (int, error) {
 	var n int
@@ -126,7 +169,8 @@ func (s *Store) Count(ctx context.Context, chatID string) (int, error) {
 	return n, err
 }
 
-// Reset deletes a chat's history.
+// Reset deletes a conversation's messages (Delete removes the conversation
+// too).
 func (s *Store) Reset(ctx context.Context, chatID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM messages WHERE chat_id = ?`, chatID)
 	return err
