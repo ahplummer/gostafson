@@ -36,7 +36,7 @@ func (a *app) help(chatID string) string {
 	return fmt.Sprintf(`commands:
   /profiles  tags, models and availability
   /status    version, history size, model servers
-  /new       start a new conversation (the current one is saved; /reset does the same)
+  /new       start a new conversation in the same project (the current one is saved; /reset does the same)
   /chats     saved conversations; /chats <words> searches them; /chat N picks one up
   /title     rename this conversation; /delete removes it for good
   /projects  list projects; /project <name> attaches one, /project off detaches

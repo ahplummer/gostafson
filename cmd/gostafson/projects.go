@@ -15,7 +15,7 @@ import (
 )
 
 // Projects (PRD D37): a chat attaches one with /project <name>; it stays
-// attached until /project off or /reset. Its turns get the project's
+// attached until /project off, and /new conversations keep it (D38). Its turns get the project's
 // instructions, memory and source list in the system prompt, and its search
 // tools; cloud profiles get them only when the project has cloud = true.
 

@@ -99,15 +99,21 @@ func (a *app) conversationCommand(ctx context.Context, chat, text string) string
 	rest := strings.TrimSpace(strings.TrimPrefix(text, f[0]))
 	switch f[0] {
 	case "/new", "/reset":
+		a.projMu.Lock()
+		project := a.attached[chat] // a new conversation stays in the project, like Claude Desktop's
+		a.projMu.Unlock()
 		if _, err := a.store.New(ctx, chat); err != nil {
 			return "error: " + err.Error()
 		}
 		a.sticky.Reset(chat)
-		a.setProject(chat, "")
 		if _, err := a.conversation(ctx, chat); err != nil {
 			return "error: " + err.Error()
 		}
-		return fmt.Sprintf("new conversation on @%s, no project; the previous one is saved (/chats lists them)", a.cfg.DefaultProfile)
+		a.setProject(chat, project)
+		if project != "" {
+			return fmt.Sprintf("new conversation in %s on @%s; the previous one is saved (/chats lists them, /project off detaches)", project, a.cfg.DefaultProfile)
+		}
+		return fmt.Sprintf("new conversation on @%s; the previous one is saved (/chats lists them)", a.cfg.DefaultProfile)
 
 	case "/chats":
 		list, err := a.store.List(ctx, rest, 15)
