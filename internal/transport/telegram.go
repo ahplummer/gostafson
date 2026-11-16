@@ -318,10 +318,11 @@ func (t *Telegram) Send(ctx context.Context, chatID, text string) error {
 var (
 	tgInlineCode = regexp.MustCompile("`([^`\n]+)`")
 	tgBold       = regexp.MustCompile(`\*\*([^*\n]+)\*\*`)
+	tgLink       = regexp.MustCompile(`\[([^\]\n]+)\]\((https?://[^\s)]+)\)`)
 )
 
 // tgHTML converts the markdown models usually write (code blocks, inline
-// code, bold) to Telegram's HTML subset. Everything else is escaped, so model
+// code, bold, [links](https://...)) to Telegram's HTML subset. Everything else is escaped, so model
 // output can't inject other tags.
 func tgHTML(s string) string {
 	var out []string
@@ -340,6 +341,7 @@ func tgHTML(s string) string {
 			continue
 		}
 		e := html.EscapeString(l)
+		e = tgLink.ReplaceAllString(e, `<a href="$2">$1</a>`)
 		e = tgInlineCode.ReplaceAllString(e, "<code>$1</code>")
 		e = tgBold.ReplaceAllString(e, "<b>$1</b>")
 		out = append(out, e)

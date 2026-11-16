@@ -116,7 +116,18 @@ func render(text string) string {
 var inlineCode = regexp.MustCompile("`[^`]+`")
 var boldText = regexp.MustCompile(`\*\*[^*]+\*\*`)
 
+// mdLink is a markdown link to a web page.
+var mdLink = regexp.MustCompile(`\[([^\]\n]+)\]\((https?://[^\s)]+)\)`)
+
+// hyperlinks shows markdown links as the terminal's own links (OSC 8): the
+// text, underlined, opens the page on Cmd+click. Apple's Terminal doesn't
+// support them, so it keeps the markdown, which still shows the address.
+var hyperlinks = os.Getenv("TERM_PROGRAM") != "Apple_Terminal"
+
 func highlightInline(l string) string {
+	if hyperlinks {
+		l = mdLink.ReplaceAllString(l, "\033]8;;$2\033\\\033[4m$1\033[24m\033]8;;\033\\")
+	}
 	l = inlineCode.ReplaceAllStringFunc(l, func(s string) string { return cyan + s + reset })
 	return boldText.ReplaceAllStringFunc(l, func(s string) string { return bold + strings.Trim(s, "*") + reset })
 }

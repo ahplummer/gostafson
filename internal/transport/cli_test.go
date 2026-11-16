@@ -150,3 +150,17 @@ func (s *syncBuffer) Write(p []byte) (int, error) {
 }
 func (s *syncBuffer) Len() int       { s.mu.Lock(); defer s.mu.Unlock(); return s.b.Len() }
 func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
+func TestRenderLinks(t *testing.T) {
+	was := hyperlinks
+	defer func() { hyperlinks = was }()
+	in := "see [cbs](https://www.cbsnews.com/a) now"
+	hyperlinks = true
+	if got, want := render(in), "see \033]8;;https://www.cbsnews.com/a\033\\\033[4mcbs\033[24m\033]8;;\033\\ now"; got != want {
+		t.Errorf("render = %q, want %q", got, want)
+	}
+	hyperlinks = false // Apple's Terminal: the markdown stays
+	if got := render(in); got != in {
+		t.Errorf("render = %q", got)
+	}
+}

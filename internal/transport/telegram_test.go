@@ -231,3 +231,11 @@ func TestTelegramPhoto(t *testing.T) {
 		}
 	}
 }
+
+func TestTgHTMLLinks(t *testing.T) {
+	got := tgHTML(`see [cbs](https://www.cbsnews.com/a?x=1&y=2) and [bad](javascript:alert(1)) <b>`)
+	want := `see <a href="https://www.cbsnews.com/a?x=1&amp;y=2">cbs</a> and [bad](javascript:alert(1)) &lt;b&gt;`
+	if got != want {
+		t.Errorf("tgHTML = %q\nwant     %q", got, want)
+	}
+}

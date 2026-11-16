@@ -16,30 +16,117 @@ function escapeHTML(s) {
   return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// Small markdown subset: fenced code, inline code, bold, error lines, and the
-// "[profile | model | 1.2s | 34 tok]" footer. Text is escaped first.
+// [text](https://...) and bare https:// addresses become links that open in a
+// new tab. Runs on escaped text, so the address can't break out of href.
+function links(h) {
+  return h.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<]+)/g, (m, text, url, bare) => {
+    let tail = "";
+    if (bare) { const t = bare.match(/[.,;:!?)\]]+$/); if (t) { tail = t[0]; bare = bare.slice(0, -tail.length); } }
+    const href = url || bare;
+    return '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + (text || bare) + "</a>" + tail;
+  });
+}
+
+// inline renders one line's spans: `code` (left as is), links, bold, italic.
+function inline(line) {
+  return line.split(/(`[^`]+`)/).map((part, i) => {
+    if (i % 2) return "<code>" + escapeHTML(part.slice(1, -1)) + "</code>";
+    return links(escapeHTML(part))
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, "$1<em>$2</em>");
+  }).join("");
+}
+
+const cells = row => row.trim().replace(/^\||\|$/g, "").split("|").map(c => inline(c.trim()));
+
+// render shows a reply as a formatted page: headings, lists, quotes, tables,
+// code blocks, links, bold and italic, then the
+// "[profile | model | 1.2s | 34 tok]" footer. All text is escaped first.
 function render(src) {
   const lines = src.split("\n");
   let footer = "";
   if (lines.length && /^\[[^\]]*\|[^\]]*\]$/.test(lines[lines.length - 1].trim())) footer = lines.pop();
   const out = [];
-  let fence = null;
-  for (const line of lines) {
-    if (line.trim().startsWith("```")) {
-      if (fence === null) { fence = []; } else { out.push('<pre class="code">' + fence.map(escapeHTML).join("\n") + "</pre>"); fence = null; }
-      continue;
+  let para = [], list = null, quote = [];
+  const flush = () => {
+    if (para.length) { out.push("<p>" + para.map(l => l.startsWith("error:") ? '<span class="err">' + inline(l) + "</span>" : inline(l)).join("<br>") + "</p>"); para = []; }
+    if (list) { out.push("<" + list.tag + ">" + list.items.map(it => '<li class="d' + it.depth + '">' + inline(it.text) + "</li>").join("") + "</" + list.tag + ">"); list = null; }
+    if (quote.length) { out.push("<blockquote>" + quote.map(inline).join("<br>") + "</blockquote>"); quote = []; }
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i], t = line.trim();
+    let m;
+    if (t.startsWith("```")) {
+      flush();
+      const code = [];
+      for (i++; i < lines.length && !lines[i].trim().startsWith("```"); i++) code.push(lines[i]);
+      out.push('<pre class="code">' + code.map(escapeHTML).join("\n") + "</pre>");
+    } else if (!t) {
+      flush();
+    } else if ((m = t.match(/^(#{1,6})\s+(.*)$/))) {
+      flush();
+      const n = m[1].length <= 3 ? 3 : m[1].length === 4 ? 4 : 5; // replies use ### for sections
+      out.push("<h" + n + ">" + inline(m[2].replace(/\s#+$/, "")) + "</h" + n + ">");
+    } else if (/^([-*_])(\s*\1){2,}$/.test(t)) {
+      flush(); out.push("<hr>");
+    } else if (t.includes("|") && i + 1 < lines.length && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(lines[i + 1])) {
+      flush();
+      const head = cells(line), rows = [];
+      for (i += 2; i < lines.length && lines[i].includes("|") && lines[i].trim(); i++) rows.push(cells(lines[i]));
+      i--;
+      out.push('<div class="table"><table><thead><tr>' + head.map(c => "<th>" + c + "</th>").join("") + "</tr></thead><tbody>" +
+        rows.map(r => "<tr>" + r.map(c => "<td>" + c + "</td>").join("") + "</tr>").join("") + "</tbody></table></div>");
+    } else if ((m = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/))) {
+      const tag = /\d/.test(m[2]) ? "ol" : "ul";
+      if (para.length || quote.length || (list && list.tag !== tag && m[1].length === 0)) flush();
+      if (!list) list = { tag, items: [] };
+      list.items.push({ depth: Math.min(Math.floor(m[1].replace(/\t/g, "  ").length / 2), 3), text: m[3] });
+    } else if ((m = t.match(/^>\s?(.*)$/))) {
+      if (para.length || list) flush();
+      quote.push(m[1]);
+    } else if (list && /^\s+/.test(line)) {
+      list.items[list.items.length - 1].text += " " + t; // a wrapped list item
+    } else {
+      if (list || quote.length) flush();
+      para.push(t);
     }
-    if (fence !== null) { fence.push(line); continue; }
-    let h = escapeHTML(line)
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
-      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    if (line.trim().startsWith("error:")) h = '<span class="err">' + h + "</span>";
-    out.push(h);
   }
-  if (fence !== null) out.push('<pre class="code">' + fence.map(escapeHTML).join("\n") + "</pre>");
-  let html = out.join("\n").replace(/\n?(<pre class="code">)/g, "$1").replace(/(<\/pre>)\n?/g, "$1");
+  flush();
+  let html = out.join("");
   if (footer) html += '<span class="footer">' + escapeHTML(footer) + "</span>";
   return html;
+}
+
+// copyText puts text on the clipboard. The page is usually plain http on the
+// tailnet, where navigator.clipboard doesn't exist, so it falls back to a
+// hidden textarea and execCommand.
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch {}
+  const ta = document.createElement("textarea");
+  ta.value = t; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch {}
+  ta.remove();
+  return ok;
+}
+
+// addReply shows a formatted reply with a button that copies its markdown
+// (without the footer).
+function addReply(src) {
+  const div = document.createElement("div");
+  div.className = "msg reply md";
+  div.innerHTML = render(src);
+  const btn = document.createElement("button");
+  btn.className = "copy"; btn.type = "button"; btn.textContent = "copy"; btn.title = "copy as markdown";
+  btn.onclick = async () => {
+    const raw = src.replace(/\n?\[[^\]\n]*\|[^\]\n]*\]\s*$/, "").trim();
+    btn.textContent = (await copyText(raw)) ? "copied" : "copy failed";
+    setTimeout(() => { btn.textContent = "copy"; }, 1500);
+  };
+  div.prepend(btn);
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
 }
 
 function add(cls, content, html) {
@@ -79,7 +166,7 @@ function handle(e) {
     case "ready": conn.textContent = "connected"; conn.className = "ok"; break;
     case "user": addUser(e); break;
     case "reply":
-      add("reply", render(e.text), true);
+      addReply(e.text);
       if (reloadAfter) { reloadAfter = false; const note = e.text; loadHistory().then(() => add("note", note)); }
       loadChats();
       break;
@@ -192,7 +279,7 @@ async function loadHistory() {
   log.textContent = "";
   for (const m of msgs) {
     if (m.role === "user") addUser({ text: m.text, images: m.images });
-    else add("reply", render(m.text), true);
+    else addReply(m.text);
   }
 }
 
