@@ -256,9 +256,33 @@ func (a *app) projectChats(ctx context.Context, chat, project string) string {
 	return b.String()
 }
 
+// firstExchange returns the first user message and the reply that ended its
+// turn (the last assistant text before the next user message).
+func firstExchange(msgs []client.Message) (user, reply string) {
+	for _, m := range msgs {
+		switch {
+		case m.Role == "user" && user == "":
+			user = m.Content
+		case m.Role == "user":
+			return user, reply
+		case m.Role == "assistant" && user != "" && len(m.ToolCalls) == 0 && strings.TrimSpace(m.Content) != "":
+			reply = m.Content
+		}
+	}
+	return user, reply
+}
+
+func cut(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if r := []rune(s); len(r) > n {
+		s = string(r[:n]) + "…"
+	}
+	return s
+}
+
 // lastExchange shows where a resumed conversation left off.
 func (a *app) lastExchange(ctx context.Context, id string) string {
-	msgs, _ := a.store.Recent(ctx, id, 6)
+	msgs, _ := a.store.Recent(ctx, id, 60) // enough to reach the user message of a turn with many tool calls
 	var lastUser, lastReply string
 	for _, m := range sessions.TextOnly(msgs) {
 		switch m.Role {
@@ -298,17 +322,19 @@ func (a *app) afterTurn(id string) {
 		return
 	}
 	if c.Title == "" {
-		msgs, _ := a.store.Recent(ctx, id, 4)
-		var withID []sessions.MessageWithID
-		for _, m := range msgs {
-			withID = append(withID, sessions.MessageWithID{Message: m})
-		}
-		title, err := a.ask(ctx, "Write a title of 3 to 6 words for this conversation. Reply with the title only, no quotes or punctuation at the end.\n\n"+
-			sessions.TranscriptText(withID))
-		if err == nil && title != "" {
-			a.store.SetTitle(ctx, id, strings.Split(title, "\n")[0])
-		} else if err != nil {
-			a.log.Info("conversation title", "err", err)
+		// From the first question and its answer. Not the last few messages:
+		// a turn that used tools ends in several tool messages, and Recent
+		// drops everything before a user message, so the model was asked to
+		// title an empty transcript and made one up.
+		msgs, _ := a.store.Recent(ctx, id, 60)
+		if user, reply := firstExchange(msgs); user != "" {
+			title, err := a.ask(ctx, "Write a title of 3 to 6 words for this conversation. Reply with the title only, no quotes or punctuation at the end.\n\n"+
+				"user: "+cut(user, 1500)+"\nassistant: "+cut(reply, 1500))
+			if err == nil && title != "" {
+				a.store.SetTitle(ctx, id, strings.Split(title, "\n")[0])
+			} else if err != nil {
+				a.log.Info("conversation title", "err", err)
+			}
 		}
 	}
 	old, err := a.store.Unsummarized(ctx, id, a.cfg.Sessions.MaxMessages)
