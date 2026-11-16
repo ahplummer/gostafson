@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/ahplummer/gostafson/internal/client"
 	"github.com/ahplummer/gostafson/internal/config"
@@ -56,8 +58,13 @@ func Run(ctx context.Context, c Chatter, tools Tools, t Turn) (Result, error) {
 	res := Result{New: []client.Message{user}}
 
 	msgs := make([]client.Message, 0, len(t.History)+2)
-	if t.Profile.SystemPrompt != "" {
-		msgs = append(msgs, client.Message{Role: "system", Content: t.Profile.SystemPrompt})
+	system := t.Profile.SystemPrompt
+	if len(t.Profile.Plugins) > 0 {
+		// Web search answers "latest" questions against today's date.
+		system = strings.TrimSpace(system + "\n\nToday is " + time.Now().Format("Monday, January 2, 2006") + ".")
+	}
+	if system != "" {
+		msgs = append(msgs, client.Message{Role: "system", Content: system})
 	}
 	msgs = append(msgs, t.History...)
 	msgs = append(msgs, user)
@@ -94,6 +101,8 @@ func Run(ctx context.Context, c Chatter, tools Tools, t Turn) (Result, error) {
 		res.New = append(res.New, msg)
 
 		if len(msg.ToolCalls) == 0 {
+			msg.Content = withSources(msg.Content, reply.Sources)
+			res.New[len(res.New)-1] = msg
 			res.Reply = msg.Content
 			res.Reasoning = reply.Reasoning
 			return res, nil
@@ -113,4 +122,26 @@ func Run(ctx context.Context, c Chatter, tools Tools, t Turn) (Result, error) {
 		}
 	}
 	return res, fmt.Errorf("%w (%d model calls)", ErrStepLimit, t.MaxSteps)
+}
+
+// withSources appends the cited pages the text doesn't already link, so every
+// transport shows them and history keeps them.
+func withSources(text string, sources []client.Source) string {
+	var b strings.Builder
+	n := 0
+	for _, src := range sources {
+		if strings.Contains(text, src.URL) {
+			continue
+		}
+		n++
+		if src.Title != "" {
+			fmt.Fprintf(&b, "%d. %s: %s\n", n, src.Title, src.URL)
+		} else {
+			fmt.Fprintf(&b, "%d. %s\n", n, src.URL)
+		}
+	}
+	if n == 0 {
+		return text
+	}
+	return strings.TrimRight(text, "\n") + "\n\nSources:\n" + strings.TrimRight(b.String(), "\n")
 }

@@ -164,3 +164,22 @@ func TestCloudRequestHasNoToolsAndCarriesProvider(t *testing.T) {
 		t.Errorf("request body = %s", body)
 	}
 }
+
+func TestReplyListsSources(t *testing.T) {
+	r := text("Iran news, per https://b.example/2.")
+	r.Sources = []client.Source{{Title: "A", URL: "https://a.example/1"}, {URL: "https://b.example/2"}, {URL: "https://c.example/3"}}
+	f := &fakeChat{replies: []client.Reply{r}}
+	p := profile(true)
+	p.Plugins = []map[string]any{{"id": "web"}}
+	res, err := Run(context.Background(), f, nil, Turn{Profile: p, Input: "news", MaxSteps: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Iran news, per https://b.example/2.\n\nSources:\n1. A: https://a.example/1\n2. https://c.example/3"
+	if res.Reply != want || res.New[1].Content != want {
+		t.Errorf("reply = %q", res.Reply)
+	}
+	if sys := f.reqs[0].Messages[0].Content; !strings.Contains(sys, "Today is ") {
+		t.Errorf("web search profile's system prompt has no date: %q", sys)
+	}
+}

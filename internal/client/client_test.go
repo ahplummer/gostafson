@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -101,5 +102,27 @@ func TestChatReportsHTTPErrors(t *testing.T) {
 	_, err := New(srv.URL, "").Chat(context.Background(), Request{Model: "missing"})
 	if err == nil || !strings.Contains(err.Error(), "404") || !strings.Contains(err.Error(), "model not found") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestChatParsesSources(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"news",
+			"annotations":[
+				{"type":"url_citation","url_citation":{"url":"https://a.example/1","title":"A"}},
+				{"type":"url_citation","url_citation":{"url":"https://a.example/1","title":"A again"}},
+				{"type":"other"}]},
+			"finish_reason":"stop"}],
+			"citations":["https://b.example/2","https://a.example/1"]}`)
+	}))
+	defer srv.Close()
+
+	reply, err := New(srv.URL, "").Chat(context.Background(), Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Source{{Title: "A", URL: "https://a.example/1"}, {URL: "https://b.example/2"}}
+	if fmt.Sprint(reply.Sources) != fmt.Sprint(want) {
+		t.Errorf("sources = %+v, want %+v", reply.Sources, want)
 	}
 }

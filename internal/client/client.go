@@ -117,6 +117,13 @@ type Reply struct {
 	Reasoning    string
 	FinishReason string
 	Usage        Usage
+	Sources      []Source // web pages the answer cites, from web search
+}
+
+// Source is one cited web page.
+type Source struct {
+	Title string
+	URL   string
 }
 
 type response struct {
@@ -125,10 +132,40 @@ type response struct {
 			Message
 			Reasoning        string `json:"reasoning"`         // Ollama, OpenRouter
 			ReasoningContent string `json:"reasoning_content"` // some other servers
+			Annotations      []struct {
+				Type        string `json:"type"`
+				URLCitation struct {
+					URL   string `json:"url"`
+					Title string `json:"title"`
+				} `json:"url_citation"`
+			} `json:"annotations"` // OpenRouter's web plugin
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage Usage `json:"usage"`
+	Citations []string `json:"citations"` // Perplexity's own API
+	Usage     Usage    `json:"usage"`
+}
+
+// sources lists the cited pages once each, in the order given.
+func (r response) sources() []Source {
+	var out []Source
+	seen := map[string]bool{}
+	add := func(url, title string) {
+		if url == "" || seen[url] {
+			return
+		}
+		seen[url] = true
+		out = append(out, Source{Title: title, URL: url})
+	}
+	for _, a := range r.Choices[0].Message.Annotations {
+		if a.Type == "url_citation" {
+			add(a.URLCitation.URL, a.URLCitation.Title)
+		}
+	}
+	for _, u := range r.Citations {
+		add(u, "")
+	}
+	return out
 }
 
 // Client talks to one OpenAI-compatible endpoint.
@@ -194,6 +231,7 @@ func (c *Client) Chat(ctx context.Context, req Request) (Reply, error) {
 		Reasoning:    reasoning,
 		FinishReason: ch.FinishReason,
 		Usage:        r.Usage,
+		Sources:      r.sources(),
 	}, nil
 }
 
